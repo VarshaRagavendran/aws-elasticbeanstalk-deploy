@@ -1,5 +1,5 @@
 {
-  "name": "@amzn/aws-elasticbeanstalk-deploy",
+  "name": "aws-elasticbeanstalk-deploy",
   "version": "0.1.0",
   "description": "Deploy applications to AWS Elastic Beanstalk",
   "license": "UNLICENSED",
