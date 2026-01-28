@@ -1,0 +1,79 @@
+name: Deploy Java App to Elastic Beanstalk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'corretto'
+          cache: 'maven'
+
+      - name: Build with Maven
+        run: mvn clean package
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy to Elastic Beanstalk
+        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
+        with:
+          aws-region: us-east-1
+          application-name: my-java-app
+          environment-name: my-java-app-prod
+          solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Corretto 21'
+          deployment-package-path: target/my-app.zip
+          create-application-if-not-exists: true
+          create-environment-if-not-exists: true
+          option-settings: |
+            [
+              {
+                "Namespace": "aws:autoscaling:launchconfiguration",
+                "OptionName": "IamInstanceProfile",
+                "Value": "aws-elasticbeanstalk-ec2-role"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:environment",
+                "OptionName": "ServiceRole",
+                "Value": "aws-elasticbeanstalk-service-role"
+              },
+              {
+                "Namespace": "aws:ec2:instances",
+                "OptionName": "InstanceTypes",
+                "Value": "t3.medium"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:environment",
+                "OptionName": "EnvironmentType",
+                "Value": "LoadBalanced"
+              },
+              {
+                "Namespace": "aws:autoscaling:asg",
+                "OptionName": "MinSize",
+                "Value": "2"
+              },
+              {
+                "Namespace": "aws:autoscaling:asg",
+                "OptionName": "MaxSize",
+                "Value": "4"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
+                "OptionName": "StreamLogs",
+                "Value": "true"
+              }
+            ]

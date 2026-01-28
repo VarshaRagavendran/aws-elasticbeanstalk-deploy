@@ -1,0 +1,30 @@
+export interface Inputs {
+    awsRegion: string;
+    applicationName: string;
+    environmentName: string;
+    applicationVersionLabel: string;
+    deploymentPackagePath?: string;
+    solutionStackName?: string;
+    platformArn?: string;
+    createEnvironmentIfNotExists: boolean;
+    createApplicationIfNotExists: boolean;
+    waitForDeployment: boolean;
+    waitForEnvironmentRecovery: boolean;
+    deploymentTimeout: number;
+    maxRetries: number;
+    retryDelay: number;
+    useExistingApplicationVersionIfAvailable: boolean;
+    creates3BucketIfNotExists: boolean;
+    excludePatterns: string;
+    optionSettings: string;
+    parsedIamInstanceProfile: string;
+    parsedServiceRole: string;
+}
+export interface ParsedIamRoles {
+    iamInstanceProfile: string;
+    serviceRole: string;
+}
+export declare function validateAllInputs(): {
+    valid: boolean;
+} & Partial<Inputs>;
+export declare function parseJsonInput(jsonString: string, inputName: string): any;

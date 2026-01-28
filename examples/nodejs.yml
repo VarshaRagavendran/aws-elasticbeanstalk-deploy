@@ -1,0 +1,80 @@
+name: Deploy Node.js App to Elastic Beanstalk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build application
+        run: npm run build --if-present
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+
+      - name: Deploy to Elastic Beanstalk
+        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
+        with:
+          aws-region: us-west-2
+          application-name: my-node-app
+          environment-name: my-node-app-prod
+          solution-stack-name: '64bit Amazon Linux 2023 v6.3.1 running Node.js 20'
+          create-application-if-not-exists: true
+          create-environment-if-not-exists: true
+          version-label: applicationVersion1
+          exclude-patterns: 'node_modules/*,*.git*,*.github*,test/*,*.md'
+          option-settings: |
+            [
+              {
+                "Namespace": "aws:autoscaling:launchconfiguration",
+                "OptionName": "IamInstanceProfile",
+                "Value": "aws-elasticbeanstalk-ec2-role"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:environment",
+                "OptionName": "ServiceRole",
+                "Value": "aws-elasticbeanstalk-service-role"
+              },
+              {
+                "Namespace": "aws:ec2:instances",
+                "OptionName": "InstanceTypes",
+                "Value": "t3.small"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:environment",
+                "OptionName": "EnvironmentType",
+                "Value": "LoadBalanced"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:application:environment",
+                "OptionName": "NODE_ENV",
+                "Value": "production"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
+                "OptionName": "StreamLogs",
+                "Value": "true"
+              }
+            ]
