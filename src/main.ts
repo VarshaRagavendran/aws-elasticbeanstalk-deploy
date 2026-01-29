@@ -31,7 +31,7 @@ export async function run(): Promise<void> {
       deploymentPackagePath, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole,
       createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment,
       waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay,
-      useExistingApplicationVersionIfAvailable, creates3BucketIfNotExists, excludePatterns,
+      useExistingApplicationVersionIfAvailable, createS3BucketIfNotExists, s3BucketName, excludePatterns,
       optionSettings
     } = inputs as Inputs;
 
@@ -47,7 +47,7 @@ export async function run(): Promise<void> {
 
     core.startGroup('🔐 Getting AWS account information');
     const accountId = await getAwsAccountId(clients, maxRetries, retryDelay);
-    core.info(`AWS Account ID: ${accountId}`);
+    core.info('✅ AWS account verified');
     core.endGroup();
 
     core.startGroup('📦 Creating deployment package');
@@ -74,7 +74,8 @@ export async function run(): Promise<void> {
         packagePath,
         maxRetries,
         retryDelay,
-        creates3BucketIfNotExists
+        createS3BucketIfNotExists,
+        s3BucketName
       );
       bucket = uploadResult.bucket;
       key = uploadResult.key;

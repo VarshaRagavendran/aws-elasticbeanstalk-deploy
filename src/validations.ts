@@ -16,7 +16,8 @@ export interface Inputs {
   maxRetries: number;
   retryDelay: number;
   useExistingApplicationVersionIfAvailable: boolean;
-  creates3BucketIfNotExists: boolean;
+  createS3BucketIfNotExists: boolean;
+  s3BucketName?: string;
   excludePatterns: string;
   optionSettings: string;
   parsedIamInstanceProfile: string;
@@ -224,6 +225,7 @@ function getAdditionalInputs() {
   const applicationVersionLabel = core.getInput('version-label') || process.env.GITHUB_SHA || `v${Date.now()}`;
   const deploymentPackagePath = core.getInput('deployment-package-path');
   const excludePatterns = core.getInput('exclude-patterns') || '';
+  const s3BucketName = core.getInput('s3-bucket-name') || undefined;
 
   // Validate version label length
   if (applicationVersionLabel.length < 1 || applicationVersionLabel.length > 100) {
@@ -236,7 +238,7 @@ function getAdditionalInputs() {
   const waitForDeployment = core.getBooleanInput('wait-for-deployment');
   const waitForEnvironmentRecovery = core.getBooleanInput('wait-for-environment-recovery');
   const useExistingApplicationVersionIfAvailable = core.getBooleanInput('use-existing-application-version-if-available');
-  const creates3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
+  const createS3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
 
   return {
     valid: true,
@@ -247,7 +249,8 @@ function getAdditionalInputs() {
     waitForDeployment,
     waitForEnvironmentRecovery,
     useExistingApplicationVersionIfAvailable,
-    creates3BucketIfNotExists,
+    createS3BucketIfNotExists,
+    s3BucketName,
     excludePatterns
   };
 }
@@ -295,7 +298,7 @@ function checkInputConflicts(inputs: Partial<Inputs>): void {
   }
 
   // Check if create-s3-bucket-if-not-exists is false
-  if (inputs.creates3BucketIfNotExists === false) {
+  if (inputs.createS3BucketIfNotExists === false) {
     core.warning(
       'create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
       'Ensure the bucket exists: elasticbeanstalk-<region>-<account-id>'
@@ -339,7 +342,8 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
     waitForDeployment: additionalInputs.waitForDeployment!,
     waitForEnvironmentRecovery: additionalInputs.waitForEnvironmentRecovery!,
     useExistingApplicationVersionIfAvailable: additionalInputs.useExistingApplicationVersionIfAvailable!,
-    creates3BucketIfNotExists: additionalInputs.creates3BucketIfNotExists!,
+    createS3BucketIfNotExists: additionalInputs.createS3BucketIfNotExists!,
+    s3BucketName: additionalInputs.s3BucketName,
     excludePatterns: additionalInputs.excludePatterns!
   };
 

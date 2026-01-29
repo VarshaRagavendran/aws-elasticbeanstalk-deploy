@@ -212,6 +212,7 @@ Skip S3 upload and version creation if the version already exists:
 | `retry-delay` | Initial delay between retries in seconds (1-60). Uses exponential backoff | `5` |
 | `use-existing-application-version-if-available` | Reuse existing application version if it exists (skips S3 upload and version creation) | `true` |
 | `create-s3-bucket-if-not-exists` | Automatically create the S3 bucket if it doesn't exist. Bucket name: `elasticbeanstalk-{region}-{account-id}` | `true` |
+| `s3-bucket-name` | Custom S3 bucket name for deployment packages. If not specified, defaults to `elasticbeanstalk-{region}-{account-id}` | Auto-generated |
 | `exclude-patterns` | Comma-separated list of glob patterns to exclude from the deployment package (only used when auto-creating packages) | None (all files included) |
 
 

@@ -6,13 +6,19 @@ import {
   DescribeEnvironmentsCommand,
   DescribeApplicationVersionsCommand,
 } from '@aws-sdk/client-elastic-beanstalk';
-import { PutObjectCommand, HeadBucketCommand, CreateBucketCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand, HeadBucketCommand, CreateBucketCommand, GetBucketAclCommand } from '@aws-sdk/client-s3';
 import { GetCallerIdentityCommand } from '@aws-sdk/client-sts';
 import { GetInstanceProfileCommand, GetRoleCommand } from '@aws-sdk/client-iam';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AWSClients } from './aws-clients';
 import { parseJsonInput } from './validations';
+
+/**
+ * Maximum deployment package size in bytes (500 MB)
+ * AWS Elastic Beanstalk limit: https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/applications-sourcebundle.html
+ */
+export const MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = 500 * 1024 * 1024;
 
 /**
  * AWS S3 LocationConstraint regions
@@ -144,11 +150,9 @@ export async function getVersionS3Location(
     const key = version.SourceBundle?.S3Key;
 
     if (!bucket || !key) {
-      const bucketStatus = bucket ? `✅ bucket: ${bucket}` : `❌ bucket: missing`;
-      const keyStatus = key ? `✅ key: ${key}` : `❌ key: missing`;
       throw new Error(
         `Application Version ${versionLabel} has incomplete S3 source bundle information. ` +
-        `Status: ${bucketStatus}, ${keyStatus}`
+        `Bucket ${bucket ? 'found' : 'missing'}, Key ${key ? 'found' : 'missing'}`
       );
     }
 
@@ -193,6 +197,35 @@ export async function environmentExists(
 }
 
 /**
+ * Verify S3 bucket ownership and write permissions
+ */
+export async function verifyBucketOwnership(
+  clients: AWSClients,
+  bucket: string,
+  accountId: string
+): Promise<void> {
+  const command = new GetBucketAclCommand({
+    Bucket: bucket,
+    ExpectedBucketOwner: accountId,
+  });
+
+  const response = await clients.getS3Client().send(command);
+
+  // Verify the owner has write permissions
+  const ownerGrants = response.Grants?.filter(grant => 
+    grant.Grantee?.ID === response.Owner?.ID
+  );
+
+  const hasWritePermission = ownerGrants?.some(grant => 
+    grant.Permission === 'WRITE' || grant.Permission === 'FULL_CONTROL'
+  );
+
+  if (!hasWritePermission) {
+    throw new Error('Bucket owner does not have write permissions');
+  }
+}
+
+/**
  * Upload deployment package to S3
  */
 export async function uploadToS3(
@@ -204,20 +237,33 @@ export async function uploadToS3(
   packagePath: string,
   maxRetries: number,
   retryDelay: number,
-  createBucketIfNotExists: boolean
+  createBucketIfNotExists: boolean,
+  customBucketName?: string
 ): Promise<{ bucket: string; key: string }> {
-  const bucket = `elasticbeanstalk-${region}-${accountId}`;
+  const bucket = customBucketName || `elasticbeanstalk-${region}-${accountId}`;
   const packageExtension = path.extname(packagePath);
   const key = `${applicationName}/${versionLabel}${packageExtension}`;
 
-  if (createBucketIfNotExists) {
-    await createS3Bucket(clients, region, bucket, maxRetries, retryDelay);
+  // Validate deployment package size
+  const fileStats = fs.statSync(packagePath);
+  const fileSizeBytes = fileStats.size;
+  const fileSizeMB = (fileSizeBytes / 1024 / 1024).toFixed(2);
+
+  if (fileSizeBytes > MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES) {
+    const maxSizeMB = (MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES / 1024 / 1024).toFixed(0);
+    throw new Error(
+      `Deployment package size (${fileSizeMB} MB) exceeds the maximum allowed size of ${maxSizeMB} MB. ` +
+      `Please reduce the package size and try again.`
+    );
   }
 
-  const fileStats = fs.statSync(packagePath);
-  const fileSizeMB = (fileStats.size / 1024 / 1024).toFixed(2);
+  if (createBucketIfNotExists) {
+    await createS3Bucket(clients, region, bucket, accountId, maxRetries, retryDelay);
+  } else {
+    await verifyBucketOwnership(clients, bucket, accountId);
+  }
 
-  core.info(`☁️  Uploading to S3: s3://${bucket}/${key}`);
+  core.info(`☁️  Uploading deployment package to S3`);
   core.info(`   File size: ${fileSizeMB} MB`);
 
   await retryWithBackoff(
@@ -247,15 +293,19 @@ export async function createS3Bucket(
   clients: AWSClients,
   region: string,
   bucket: string,
+  accountId: string,
   maxRetries: number,
   retryDelay: number
 ): Promise<void> {
+  let bucketExists = false;
+  
   try {
-    core.info(`🪣 Checking if S3 bucket exists: ${bucket}`);
+    core.info('🪣 Checking if S3 bucket exists');
     await clients.getS3Client().send(new HeadBucketCommand({ Bucket: bucket }));
     core.info('✅ S3 bucket exists');
+    bucketExists = true;
   } catch (_error) {
-    core.info(`🪣 S3 bucket doesn't exist, creating: ${bucket}`);
+    core.info('🪣 S3 bucket does not exist, Creating S3 bucket');
 
     await retryWithBackoff(
       async () => {
@@ -277,6 +327,9 @@ export async function createS3Bucket(
 
     core.info('✅ S3 bucket created');
   }
+  
+  // Verify ownership after bucket exists (either found or created)
+  await verifyBucketOwnership(clients, bucket, accountId);
 }
 
 /**
@@ -462,9 +515,9 @@ export async function verifyIamRoles(
       InstanceProfileName: iamInstanceProfile,
     });
     await clients.getIAMClient().send(profileCommand);
-    core.info(`✅ Instance profile exists: ${iamInstanceProfile}`);
+    core.info('✅ Instance profile verified');
   } catch (_error) {
-    throw new Error(`Instance profile '${iamInstanceProfile}' does not exist`);
+    throw new Error(`Instance profile does not exist or is not accessible`);
   }
 
   try {
@@ -472,9 +525,9 @@ export async function verifyIamRoles(
       RoleName: serviceRole,
     });
     await clients.getIAMClient().send(roleCommand);
-    core.info(`✅ Service role exists: ${serviceRole}`);
+    core.info('✅ Service role verified');
   } catch (_error) {
-    throw new Error(`Service role '${serviceRole}' does not exist`);
+    throw new Error(`Service role does not exist or is not accessible`);
   }
 }
 

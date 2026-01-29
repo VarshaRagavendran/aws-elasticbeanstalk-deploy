@@ -77,6 +77,7 @@ jest.mock('@aws-sdk/client-s3', () => ({
   PutObjectCommand: jest.fn(),
   HeadBucketCommand: jest.fn(),
   CreateBucketCommand: jest.fn(),
+  GetBucketAclCommand: jest.fn(),
 }));
 
 jest.mock('@aws-sdk/client-sts', () => ({
@@ -301,7 +302,7 @@ describe('Main Functions', () => {
         .mockRejectedValueOnce(new Error('NoSuchEntity'))
         .mockResolvedValue({});
       await expect(verifyIamRoles(mockClients, 'bad-profile', 'role'))
-        .rejects.toThrow("Instance profile 'bad-profile' does not exist");
+        .rejects.toThrow("Instance profile does not exist or is not accessible");
     });
 
     it('should throw error for missing service role', async () => {
@@ -309,7 +310,7 @@ describe('Main Functions', () => {
         .mockResolvedValueOnce({})
         .mockRejectedValueOnce(new Error('NoSuchEntity'));
       await expect(verifyIamRoles(mockClients, 'profile', 'bad-role'))
-        .rejects.toThrow("Service role 'bad-role' does not exist");
+        .rejects.toThrow("Service role does not exist or is not accessible");
     });
   });
 
@@ -424,11 +425,12 @@ describe('Main Functions', () => {
         if (callCount === 1) return Promise.resolve({ Account: '123456789012' });
         if (callCount === 2) return Promise.resolve({ ApplicationVersions: [] });
         if (callCount === 3) return Promise.resolve({});  // HeadBucket
-        if (callCount === 4) return Promise.resolve({});  // PutObject
-        if (callCount === 5) return Promise.resolve({});  // CreateAppVersion
-        if (callCount === 6) return Promise.resolve({ Environments: [{ Status: 'Ready', Health: 'Green' }] });  // DescribeEnvironment
-        if (callCount === 7) return Promise.resolve({});  // UpdateEnvironment
-        if (callCount === 8) return Promise.resolve({ Environments: [{ CNAME: 'test-env.elasticbeanstalk.com', EnvironmentId: 'e-123', Status: 'Ready', Health: 'Green' }] });
+        if (callCount === 4) return Promise.resolve({ Owner: { ID: 'owner-id' }, Grants: [{ Grantee: { ID: 'owner-id' }, Permission: 'WRITE' }] });  // GetBucketAcl
+        if (callCount === 5) return Promise.resolve({});  // PutObject
+        if (callCount === 6) return Promise.resolve({});  // CreateAppVersion
+        if (callCount === 7) return Promise.resolve({ Environments: [{ Status: 'Ready', Health: 'Green' }] });  // DescribeEnvironment
+        if (callCount === 8) return Promise.resolve({});  // UpdateEnvironment
+        if (callCount === 9) return Promise.resolve({ Environments: [{ CNAME: 'test-env.elasticbeanstalk.com', EnvironmentId: 'e-123', Status: 'Ready', Health: 'Green' }] });
 
         return Promise.resolve({});
       });
@@ -454,13 +456,14 @@ describe('Main Functions', () => {
         if (callCount === 1) return Promise.resolve({ Account: '123456789012' });
         if (callCount === 2) return Promise.resolve({ ApplicationVersions: [] });
         if (callCount === 3) return Promise.resolve({});  // HeadBucket
-        if (callCount === 4) return Promise.resolve({});  // PutObject
-        if (callCount === 5) return Promise.resolve({});  // CreateAppVersion
-        if (callCount === 6) return Promise.resolve({ Environments: [] });  // DescribeEnvironment (no env found)
-        if (callCount === 7) return Promise.resolve({});  // GetInstanceProfile
-        if (callCount === 8) return Promise.resolve({});  // GetRole
-        if (callCount === 9) return Promise.resolve({});  // CreateEnv
-        if (callCount === 10) return Promise.resolve({ Environments: [{ CNAME: 'new-env.elasticbeanstalk.com', EnvironmentId: 'e-new', Status: 'Ready', Health: 'Green' }] });
+        if (callCount === 4) return Promise.resolve({ Owner: { ID: 'owner-id' }, Grants: [{ Grantee: { ID: 'owner-id' }, Permission: 'FULL_CONTROL' }] });  // GetBucketAcl
+        if (callCount === 5) return Promise.resolve({});  // PutObject
+        if (callCount === 6) return Promise.resolve({});  // CreateAppVersion
+        if (callCount === 7) return Promise.resolve({ Environments: [] });  // DescribeEnvironment (no env found)
+        if (callCount === 8) return Promise.resolve({});  // GetInstanceProfile
+        if (callCount === 9) return Promise.resolve({});  // GetRole
+        if (callCount === 10) return Promise.resolve({});  // CreateEnv
+        if (callCount === 11) return Promise.resolve({ Environments: [{ CNAME: 'new-env.elasticbeanstalk.com', EnvironmentId: 'e-new', Status: 'Ready', Health: 'Green' }] });
 
         return Promise.resolve({});
       });
@@ -496,14 +499,26 @@ describe('Main Functions', () => {
     });
 
     it('should handle environment not exists without create flag', async () => {
-      // Use default behavior where create-if-not-exists is false but ecreate-s3-bucket-if-not-exists is true
-      mockSend
-        .mockResolvedValueOnce({ Account: '123456789012' })
-        .mockResolvedValueOnce({ ApplicationVersions: [] })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ Environments: [] });
+      // Use default behavior where create-environment-if-not-exists is false
+      mockSend.mockImplementation(() => {
+        const callCount = mockSend.mock.calls.length + 1;
+
+        if (callCount === 1) return Promise.resolve({ Account: '123456789012' }); // GetCallerIdentity
+        if (callCount === 2) return Promise.resolve({ ApplicationVersions: [] }); // DescribeApplicationVersions
+        if (callCount === 3) return Promise.resolve({}); // HeadBucket
+        if (callCount === 4) return Promise.resolve({ // GetBucketAcl
+          Owner: { ID: 'owner-id' },
+          Grants: [{ 
+            Grantee: { Type: 'CanonicalUser', ID: 'owner-id' }, 
+            Permission: 'WRITE' 
+          }]
+        });
+        if (callCount === 5) return Promise.resolve({}); // PutObject
+        if (callCount === 6) return Promise.resolve({}); // CreateAppVersion
+        if (callCount === 7) return Promise.resolve({ Environments: [] }); // DescribeEnvironment (no env found)
+
+        return Promise.resolve({});
+      });
 
       await run();
 

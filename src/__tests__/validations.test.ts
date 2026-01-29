@@ -463,7 +463,7 @@ describe('Validation Functions', () => {
       const result = validateAllInputs();
 
       expect(result.valid).toBe(false);
-      expect(mockedCore.setFailed).toHaveBeenCalledWith('Invalid JSON in option-settings: Unexpected token \'i\', "invalid-json" is not valid JSON');
+      expect(mockedCore.setFailed).toHaveBeenCalledWith(expect.stringContaining('Invalid JSON in option-settings:'));
     });
 
     it('should fail validation when neither solution-stack-name nor platform-arn is provided', () => {
