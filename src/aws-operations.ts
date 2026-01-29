@@ -8,7 +8,6 @@ import {
 } from '@aws-sdk/client-elastic-beanstalk';
 import { PutObjectCommand, HeadBucketCommand, CreateBucketCommand, GetBucketAclCommand } from '@aws-sdk/client-s3';
 import { GetCallerIdentityCommand } from '@aws-sdk/client-sts';
-import { GetInstanceProfileCommand, GetRoleCommand } from '@aws-sdk/client-iam';
 import * as fs from 'fs';
 import * as path from 'path';
 import { AWSClients } from './aws-clients';
@@ -448,7 +447,7 @@ export async function createEnvironment(
 ): Promise<void> {
   core.info(`🆕 Creating new environment: ${environmentName}`);
 
-  await verifyIamRoles(clients, iamInstanceProfile, serviceRole);
+
 
   const baseOptionSettings = [
     {
@@ -502,35 +501,6 @@ export async function createEnvironment(
 
 /**
  * Verify IAM roles exist
- */
-export async function verifyIamRoles(
-  clients: AWSClients,
-  iamInstanceProfile: string,
-  serviceRole: string
-): Promise<void> {
-  core.info('🔐 Verifying IAM roles exist...');
-
-  try {
-    const profileCommand = new GetInstanceProfileCommand({
-      InstanceProfileName: iamInstanceProfile,
-    });
-    await clients.getIAMClient().send(profileCommand);
-    core.info('✅ Instance profile verified');
-  } catch (_error) {
-    throw new Error(`Instance profile does not exist or is not accessible`);
-  }
-
-  try {
-    const roleCommand = new GetRoleCommand({
-      RoleName: serviceRole,
-    });
-    await clients.getIAMClient().send(roleCommand);
-    core.info('✅ Service role verified');
-  } catch (_error) {
-    throw new Error(`Service role does not exist or is not accessible`);
-  }
-}
-
 /**
  * Get environment information
  */

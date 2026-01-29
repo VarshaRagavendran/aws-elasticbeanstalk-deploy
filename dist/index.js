@@ -95097,12 +95097,11 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getEnvironmentInfo = exports.verifyIamRoles = exports.createEnvironment = exports.updateEnvironment = exports.createApplicationVersion = exports.createS3Bucket = exports.uploadToS3 = exports.verifyBucketOwnership = exports.environmentExists = exports.getVersionS3Location = exports.applicationVersionExists = exports.getAwsAccountId = exports.retryWithBackoff = exports.AWS_S3_REGIONS = exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = void 0;
+exports.getEnvironmentInfo = exports.createEnvironment = exports.updateEnvironment = exports.createApplicationVersion = exports.createS3Bucket = exports.uploadToS3 = exports.verifyBucketOwnership = exports.environmentExists = exports.getVersionS3Location = exports.applicationVersionExists = exports.getAwsAccountId = exports.retryWithBackoff = exports.AWS_S3_REGIONS = exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const client_elastic_beanstalk_1 = __nccwpck_require__(76114);
 const client_s3_1 = __nccwpck_require__(53711);
 const client_sts_1 = __nccwpck_require__(71695);
-const client_iam_1 = __nccwpck_require__(16764);
 const fs = __importStar(__nccwpck_require__(79896));
 const path = __importStar(__nccwpck_require__(16928));
 const validations_1 = __nccwpck_require__(5215);
@@ -95394,7 +95393,6 @@ exports.updateEnvironment = updateEnvironment;
  */
 async function createEnvironment(clients, applicationName, environmentName, versionLabel, customOptionSettings, solutionStackName, platformArn, iamInstanceProfile, serviceRole, maxRetries, retryDelay) {
     core.info(`🆕 Creating new environment: ${environmentName}`);
-    await verifyIamRoles(clients, iamInstanceProfile, serviceRole);
     const baseOptionSettings = [
         {
             Namespace: 'aws:autoscaling:launchconfiguration',
@@ -95437,31 +95435,6 @@ async function createEnvironment(clients, applicationName, environmentName, vers
 exports.createEnvironment = createEnvironment;
 /**
  * Verify IAM roles exist
- */
-async function verifyIamRoles(clients, iamInstanceProfile, serviceRole) {
-    core.info('🔐 Verifying IAM roles exist...');
-    try {
-        const profileCommand = new client_iam_1.GetInstanceProfileCommand({
-            InstanceProfileName: iamInstanceProfile,
-        });
-        await clients.getIAMClient().send(profileCommand);
-        core.info('✅ Instance profile verified');
-    }
-    catch (_error) {
-        throw new Error(`Instance profile does not exist or is not accessible`);
-    }
-    try {
-        const roleCommand = new client_iam_1.GetRoleCommand({
-            RoleName: serviceRole,
-        });
-        await clients.getIAMClient().send(roleCommand);
-        core.info('✅ Service role verified');
-    }
-    catch (_error) {
-        throw new Error(`Service role does not exist or is not accessible`);
-    }
-}
-exports.verifyIamRoles = verifyIamRoles;
 /**
  * Get environment information
  */

@@ -104,7 +104,6 @@ import {
   environmentExists,
   updateEnvironment,
   createEnvironment,
-  verifyIamRoles,
   getEnvironmentInfo,
 } from '../aws-operations';
 import { waitForDeploymentCompletion, waitForHealthRecovery } from '../monitoring';
@@ -287,30 +286,6 @@ describe('Main Functions', () => {
       mockSend.mockResolvedValue({});
       await createEnvironment(mockClients, 'app', 'env', 'v1.0.0', '[{"Namespace":"test","OptionName":"test","Value":"test"}]', 'stack', undefined, 'profile', 'role', 3, 1);
       expect(mockSend).toHaveBeenCalledTimes(3);
-    });
-  });
-
-  describe('verifyIamRoles', () => {
-    it('should verify roles exist', async () => {
-      mockSend.mockResolvedValue({});
-      await verifyIamRoles(mockClients, 'profile', 'role');
-      expect(mockSend).toHaveBeenCalledTimes(2);
-    });
-
-    it('should throw error for missing instance profile', async () => {
-      mockSend
-        .mockRejectedValueOnce(new Error('NoSuchEntity'))
-        .mockResolvedValue({});
-      await expect(verifyIamRoles(mockClients, 'bad-profile', 'role'))
-        .rejects.toThrow("Instance profile does not exist or is not accessible");
-    });
-
-    it('should throw error for missing service role', async () => {
-      mockSend
-        .mockResolvedValueOnce({})
-        .mockRejectedValueOnce(new Error('NoSuchEntity'));
-      await expect(verifyIamRoles(mockClients, 'profile', 'bad-role'))
-        .rejects.toThrow("Service role does not exist or is not accessible");
     });
   });
 

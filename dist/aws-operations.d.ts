@@ -66,8 +66,6 @@ export declare function updateEnvironment(clients: AWSClients, applicationName: 
 export declare function createEnvironment(clients: AWSClients, applicationName: string, environmentName: string, versionLabel: string, customOptionSettings: string, solutionStackName: string | undefined, platformArn: string | undefined, iamInstanceProfile: string, serviceRole: string, maxRetries: number, retryDelay: number): Promise<void>;
 /**
  * Verify IAM roles exist
- */
-export declare function verifyIamRoles(clients: AWSClients, iamInstanceProfile: string, serviceRole: string): Promise<void>;
 /**
  * Get environment information
  */
