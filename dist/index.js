@@ -95757,23 +95757,29 @@ async function describeRecentEvents(clients, applicationName, environmentName) {
  */
 async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout) {
     core.info('⏳ Waiting for deployment to complete...');
-    try {
-        await (0, client_elastic_beanstalk_1.waitUntilEnvironmentUpdated)({
-            client: clients.getElasticBeanstalkClient(),
-            maxWaitTime: timeout,
-            minDelay: 10,
-            maxDelay: 30,
-        }, {
+    const startTime = Date.now();
+    const maxWait = timeout * 1000;
+    while (Date.now() - startTime < maxWait) {
+        const command = new client_elastic_beanstalk_1.DescribeEnvironmentsCommand({
             ApplicationName: applicationName,
             EnvironmentNames: [environmentName],
         });
-        core.info('✅ Deployment complete');
+        const response = await clients.getElasticBeanstalkClient().send(command);
+        if (response.Environments && response.Environments.length > 0) {
+            const env = response.Environments[0];
+            const status = env.Status;
+            if (status === 'Ready') {
+                core.info('✅ Deployment complete');
+                return;
+            }
+            core.info(`Current status: ${status}`);
+        }
+        // Wait 2 seconds before checking again
+        await new Promise(resolve => setTimeout(resolve, 2000));
     }
-    catch (error) {
-        // Fetch recent events to help diagnose the deployment failure
-        await describeRecentEvents(clients, applicationName, environmentName);
-        throw error;
-    }
+    // Timeout occurred - fetch events to help diagnose
+    await describeRecentEvents(clients, applicationName, environmentName);
+    throw new Error(`Deployment timed out after ${timeout}s`);
 }
 exports.waitForDeploymentCompletion = waitForDeploymentCompletion;
 /**
