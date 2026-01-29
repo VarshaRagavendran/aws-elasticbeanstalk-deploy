@@ -14,7 +14,8 @@ export interface Inputs {
     maxRetries: number;
     retryDelay: number;
     useExistingApplicationVersionIfAvailable: boolean;
-    creates3BucketIfNotExists: boolean;
+    createS3BucketIfNotExists: boolean;
+    s3BucketName?: string;
     excludePatterns: string;
     optionSettings: string;
     parsedIamInstanceProfile: string;

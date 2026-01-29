@@ -1,5 +1,10 @@
 import { AWSClients } from './aws-clients';
 /**
+ * Maximum deployment package size in bytes (500 MB)
+ * AWS Elastic Beanstalk limit: https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/applications-sourcebundle.html
+ */
+export declare const MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES: number;
+/**
  * AWS S3 LocationConstraint regions
  * Used for S3 bucket creation outside of us-east-1
  */
@@ -33,16 +38,20 @@ export declare function environmentExists(clients: AWSClients, applicationName: 
     health?: string;
 }>;
 /**
+ * Verify S3 bucket ownership and write permissions
+ */
+export declare function verifyBucketOwnership(clients: AWSClients, bucket: string, accountId: string): Promise<void>;
+/**
  * Upload deployment package to S3
  */
-export declare function uploadToS3(clients: AWSClients, region: string, accountId: string, applicationName: string, versionLabel: string, packagePath: string, maxRetries: number, retryDelay: number, createBucketIfNotExists: boolean): Promise<{
+export declare function uploadToS3(clients: AWSClients, region: string, accountId: string, applicationName: string, versionLabel: string, packagePath: string, maxRetries: number, retryDelay: number, createBucketIfNotExists: boolean, customBucketName?: string): Promise<{
     bucket: string;
     key: string;
 }>;
 /**
  * Create S3 bucket exists if not exists
  */
-export declare function createS3Bucket(clients: AWSClients, region: string, bucket: string, maxRetries: number, retryDelay: number): Promise<void>;
+export declare function createS3Bucket(clients: AWSClients, region: string, bucket: string, accountId: string, maxRetries: number, retryDelay: number): Promise<void>;
 /**
  * Create an application version
  */

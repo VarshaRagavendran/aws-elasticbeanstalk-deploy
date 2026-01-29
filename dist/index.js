@@ -95097,7 +95097,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.getEnvironmentInfo = exports.verifyIamRoles = exports.createEnvironment = exports.updateEnvironment = exports.createApplicationVersion = exports.createS3Bucket = exports.uploadToS3 = exports.environmentExists = exports.getVersionS3Location = exports.applicationVersionExists = exports.getAwsAccountId = exports.retryWithBackoff = exports.AWS_S3_REGIONS = void 0;
+exports.getEnvironmentInfo = exports.verifyIamRoles = exports.createEnvironment = exports.updateEnvironment = exports.createApplicationVersion = exports.createS3Bucket = exports.uploadToS3 = exports.verifyBucketOwnership = exports.environmentExists = exports.getVersionS3Location = exports.applicationVersionExists = exports.getAwsAccountId = exports.retryWithBackoff = exports.AWS_S3_REGIONS = exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const client_elastic_beanstalk_1 = __nccwpck_require__(76114);
 const client_s3_1 = __nccwpck_require__(53711);
@@ -95106,6 +95106,11 @@ const client_iam_1 = __nccwpck_require__(16764);
 const fs = __importStar(__nccwpck_require__(79896));
 const path = __importStar(__nccwpck_require__(16928));
 const validations_1 = __nccwpck_require__(5215);
+/**
+ * Maximum deployment package size in bytes (500 MB)
+ * AWS Elastic Beanstalk limit: https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/applications-sourcebundle.html
+ */
+exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = 500 * 1024 * 1024;
 /**
  * AWS S3 LocationConstraint regions
  * Used for S3 bucket creation outside of us-east-1
@@ -95205,10 +95210,8 @@ async function getVersionS3Location(clients, applicationName, versionLabel) {
         const bucket = version.SourceBundle?.S3Bucket;
         const key = version.SourceBundle?.S3Key;
         if (!bucket || !key) {
-            const bucketStatus = bucket ? `✅ bucket: ${bucket}` : `❌ bucket: missing`;
-            const keyStatus = key ? `✅ key: ${key}` : `❌ key: missing`;
             throw new Error(`Application Version ${versionLabel} has incomplete S3 source bundle information. ` +
-                `Status: ${bucketStatus}, ${keyStatus}`);
+                `Bucket ${bucket ? 'found' : 'missing'}, Key ${key ? 'found' : 'missing'}`);
         }
         return { bucket, key };
     }
@@ -95245,18 +95248,45 @@ async function environmentExists(clients, applicationName, environmentName) {
 }
 exports.environmentExists = environmentExists;
 /**
+ * Verify S3 bucket ownership and write permissions
+ */
+async function verifyBucketOwnership(clients, bucket, accountId) {
+    const command = new client_s3_1.GetBucketAclCommand({
+        Bucket: bucket,
+        ExpectedBucketOwner: accountId,
+    });
+    const response = await clients.getS3Client().send(command);
+    // Verify the owner has write permissions
+    const ownerGrants = response.Grants?.filter(grant => grant.Grantee?.ID === response.Owner?.ID);
+    const hasWritePermission = ownerGrants?.some(grant => grant.Permission === 'WRITE' || grant.Permission === 'FULL_CONTROL');
+    if (!hasWritePermission) {
+        throw new Error('Bucket owner does not have write permissions');
+    }
+}
+exports.verifyBucketOwnership = verifyBucketOwnership;
+/**
  * Upload deployment package to S3
  */
-async function uploadToS3(clients, region, accountId, applicationName, versionLabel, packagePath, maxRetries, retryDelay, createBucketIfNotExists) {
-    const bucket = `elasticbeanstalk-${region}-${accountId}`;
+async function uploadToS3(clients, region, accountId, applicationName, versionLabel, packagePath, maxRetries, retryDelay, createBucketIfNotExists, customBucketName) {
+    const bucket = customBucketName || `elasticbeanstalk-${region}-${accountId}`;
     const packageExtension = path.extname(packagePath);
     const key = `${applicationName}/${versionLabel}${packageExtension}`;
-    if (createBucketIfNotExists) {
-        await createS3Bucket(clients, region, bucket, maxRetries, retryDelay);
-    }
+    // Validate deployment package size
     const fileStats = fs.statSync(packagePath);
-    const fileSizeMB = (fileStats.size / 1024 / 1024).toFixed(2);
-    core.info(`☁️  Uploading to S3: s3://${bucket}/${key}`);
+    const fileSizeBytes = fileStats.size;
+    const fileSizeMB = (fileSizeBytes / 1024 / 1024).toFixed(2);
+    if (fileSizeBytes > exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES) {
+        const maxSizeMB = (exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES / 1024 / 1024).toFixed(0);
+        throw new Error(`Deployment package size (${fileSizeMB} MB) exceeds the maximum allowed size of ${maxSizeMB} MB. ` +
+            `Please reduce the package size and try again.`);
+    }
+    if (createBucketIfNotExists) {
+        await createS3Bucket(clients, region, bucket, accountId, maxRetries, retryDelay);
+    }
+    else {
+        await verifyBucketOwnership(clients, bucket, accountId);
+    }
+    core.info(`☁️  Uploading deployment package to S3`);
     core.info(`   File size: ${fileSizeMB} MB`);
     await retryWithBackoff(async () => {
         const fileContent = fs.readFileSync(packagePath);
@@ -95274,14 +95304,16 @@ exports.uploadToS3 = uploadToS3;
 /**
  * Create S3 bucket exists if not exists
  */
-async function createS3Bucket(clients, region, bucket, maxRetries, retryDelay) {
+async function createS3Bucket(clients, region, bucket, accountId, maxRetries, retryDelay) {
+    let bucketExists = false;
     try {
-        core.info(`🪣 Checking if S3 bucket exists: ${bucket}`);
+        core.info('🪣 Checking if S3 bucket exists');
         await clients.getS3Client().send(new client_s3_1.HeadBucketCommand({ Bucket: bucket }));
         core.info('✅ S3 bucket exists');
+        bucketExists = true;
     }
     catch (_error) {
-        core.info(`🪣 S3 bucket doesn't exist, creating: ${bucket}`);
+        core.info('🪣 S3 bucket does not exist, Creating S3 bucket');
         await retryWithBackoff(async () => {
             const createParams = region === 'us-east-1'
                 ? { Bucket: bucket }
@@ -95295,6 +95327,8 @@ async function createS3Bucket(clients, region, bucket, maxRetries, retryDelay) {
         }, maxRetries, retryDelay, 'Create S3 bucket');
         core.info('✅ S3 bucket created');
     }
+    // Verify ownership after bucket exists (either found or created)
+    await verifyBucketOwnership(clients, bucket, accountId);
 }
 exports.createS3Bucket = createS3Bucket;
 /**
@@ -95411,20 +95445,20 @@ async function verifyIamRoles(clients, iamInstanceProfile, serviceRole) {
             InstanceProfileName: iamInstanceProfile,
         });
         await clients.getIAMClient().send(profileCommand);
-        core.info(`✅ Instance profile exists: ${iamInstanceProfile}`);
+        core.info('✅ Instance profile verified');
     }
     catch (_error) {
-        throw new Error(`Instance profile '${iamInstanceProfile}' does not exist`);
+        throw new Error(`Instance profile does not exist or is not accessible`);
     }
     try {
         const roleCommand = new client_iam_1.GetRoleCommand({
             RoleName: serviceRole,
         });
         await clients.getIAMClient().send(roleCommand);
-        core.info(`✅ Service role exists: ${serviceRole}`);
+        core.info('✅ Service role verified');
     }
     catch (_error) {
-        throw new Error(`Service role '${serviceRole}' does not exist`);
+        throw new Error(`Service role does not exist or is not accessible`);
     }
 }
 exports.verifyIamRoles = verifyIamRoles;
@@ -95577,7 +95611,7 @@ async function run() {
         if (!inputs.valid) {
             return;
         }
-        const { awsRegion, applicationName, environmentName, applicationVersionLabel, deploymentPackagePath, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole, createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment, waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay, useExistingApplicationVersionIfAvailable, creates3BucketIfNotExists, excludePatterns, optionSettings } = inputs;
+        const { awsRegion, applicationName, environmentName, applicationVersionLabel, deploymentPackagePath, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole, createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment, waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay, useExistingApplicationVersionIfAvailable, createS3BucketIfNotExists, s3BucketName, excludePatterns, optionSettings } = inputs;
         core.startGroup('📋 Validating inputs');
         core.info(`Application: ${applicationName}`);
         core.info(`Environment: ${environmentName}`);
@@ -95588,7 +95622,7 @@ async function run() {
         const clients = aws_clients_1.AWSClients.getInstance(awsRegion);
         core.startGroup('🔐 Getting AWS account information');
         const accountId = await (0, aws_operations_1.getAwsAccountId)(clients, maxRetries, retryDelay);
-        core.info(`AWS Account ID: ${accountId}`);
+        core.info('✅ AWS account verified');
         core.endGroup();
         core.startGroup('📦 Creating deployment package');
         const { path: packagePath } = await (0, deploymentpackage_1.createDeploymentPackage)(deploymentPackagePath, applicationVersionLabel, excludePatterns);
@@ -95599,7 +95633,7 @@ async function run() {
         const shouldCreateNewApplicationVersion = !useExistingApplicationVersionIfAvailable || !(await (0, aws_operations_1.applicationVersionExists)(clients, applicationName, applicationVersionLabel));
         if (shouldCreateNewApplicationVersion) {
             core.startGroup('☁️  Uploading to S3');
-            const uploadResult = await (0, aws_operations_1.uploadToS3)(clients, awsRegion, accountId, applicationName, applicationVersionLabel, packagePath, maxRetries, retryDelay, creates3BucketIfNotExists);
+            const uploadResult = await (0, aws_operations_1.uploadToS3)(clients, awsRegion, accountId, applicationName, applicationVersionLabel, packagePath, maxRetries, retryDelay, createS3BucketIfNotExists, s3BucketName);
             bucket = uploadResult.bucket;
             key = uploadResult.key;
             core.endGroup();
@@ -96006,6 +96040,7 @@ function getAdditionalInputs() {
     const applicationVersionLabel = core.getInput('version-label') || process.env.GITHUB_SHA || `v${Date.now()}`;
     const deploymentPackagePath = core.getInput('deployment-package-path');
     const excludePatterns = core.getInput('exclude-patterns') || '';
+    const s3BucketName = core.getInput('s3-bucket-name') || undefined;
     // Validate version label length
     if (applicationVersionLabel.length < 1 || applicationVersionLabel.length > 100) {
         core.setFailed(`Version label must be between 1 and 100 characters, got ${applicationVersionLabel.length}`);
@@ -96016,7 +96051,7 @@ function getAdditionalInputs() {
     const waitForDeployment = core.getBooleanInput('wait-for-deployment');
     const waitForEnvironmentRecovery = core.getBooleanInput('wait-for-environment-recovery');
     const useExistingApplicationVersionIfAvailable = core.getBooleanInput('use-existing-application-version-if-available');
-    const creates3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
+    const createS3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
     return {
         valid: true,
         applicationVersionLabel,
@@ -96026,7 +96061,8 @@ function getAdditionalInputs() {
         waitForDeployment,
         waitForEnvironmentRecovery,
         useExistingApplicationVersionIfAvailable,
-        creates3BucketIfNotExists,
+        createS3BucketIfNotExists,
+        s3BucketName,
         excludePatterns
     };
 }
@@ -96058,7 +96094,7 @@ function checkInputConflicts(inputs) {
         core.warning('max-retries is set to 0. API calls will not be retried on failure, which may cause transient errors to fail the deployment.');
     }
     // Check if create-s3-bucket-if-not-exists is false
-    if (inputs.creates3BucketIfNotExists === false) {
+    if (inputs.createS3BucketIfNotExists === false) {
         core.warning('create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
             'Ensure the bucket exists: elasticbeanstalk-<region>-<account-id>');
     }
@@ -96096,7 +96132,8 @@ function validateAllInputs() {
         waitForDeployment: additionalInputs.waitForDeployment,
         waitForEnvironmentRecovery: additionalInputs.waitForEnvironmentRecovery,
         useExistingApplicationVersionIfAvailable: additionalInputs.useExistingApplicationVersionIfAvailable,
-        creates3BucketIfNotExists: additionalInputs.creates3BucketIfNotExists,
+        createS3BucketIfNotExists: additionalInputs.createS3BucketIfNotExists,
+        s3BucketName: additionalInputs.s3BucketName,
         excludePatterns: additionalInputs.excludePatterns
     };
     checkInputConflicts(validatedInputs);
