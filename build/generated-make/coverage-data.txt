@@ -2,3 +2,7 @@ typescript:line:83.984375
 typescript:branch:73.93617021276596
 typescript:line:84.63035019455253
 typescript:branch:74.73684210526315
+typescript:line:82.66666666666667
+typescript:branch:71
+typescript:line:82.66666666666667
+typescript:branch:71

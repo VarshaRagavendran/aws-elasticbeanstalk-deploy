@@ -9,15 +9,15 @@ import { AWSClients } from './aws-clients';
 /**
  * Fetch recent environment events for debugging and check for fatal/error events
  * Returns error information if fatal/error events are found
+ * Only displays events newer than lastSeenEventDate to avoid duplicates
  */
 async function describeRecentEvents(
   clients: AWSClients,
   applicationName: string,
-  environmentName: string
-): Promise<{ hasError: boolean; errorMessage?: string }> {
+  environmentName: string,
+  lastSeenEventDate?: Date
+): Promise<{ hasError: boolean; errorMessage?: string; lastEventDate?: Date }> {
   try {
-    core.info('🔍 Fetching most recent events...');
-
     const command = new DescribeEventsCommand({
       ApplicationName: applicationName,
       EnvironmentName: environmentName,
@@ -27,41 +27,61 @@ async function describeRecentEvents(
     const response = await clients.getElasticBeanstalkClient().send(command);
 
     if (response.Events && response.Events.length > 0) {
-      core.info('📋 Recent events:');
-      
-      // Track fatal/error events while displaying all events
-      const fatalOrErrorEvents: Array<{ message: string }> = [];
-      
-      response.Events.forEach((event) => {
-        const timestamp = event.EventDate?.toISOString() || 'Unknown time';
-        const severity = event.Severity || 'INFO';
-        const message = event.Message || 'No message';
+      // Filter to only new events (those after lastSeenEventDate)
+      const newEvents = lastSeenEventDate
+        ? response.Events.filter((event) => {
+            const eventDate = event.EventDate;
+            return eventDate && eventDate > lastSeenEventDate;
+          })
+        : response.Events;
 
-        if (severity === 'ERROR' || severity === 'FATAL') {
-          core.error(`  [${timestamp}] ${severity}: ${message}`);
-          fatalOrErrorEvents.push({ message });
-        } else if (severity === 'WARN') {
-          core.warning(`  [${timestamp}] ${severity}: ${message}`);
-        } else {
-          core.info(`  [${timestamp}] ${severity}: ${message}`);
+      if (newEvents.length > 0) {
+        core.info('📋 Recent events:');
+        
+        // Track fatal/error events while displaying all events
+        const fatalOrErrorEvents: Array<{ message: string }> = [];
+        let mostRecentDate: Date | undefined;
+        
+        newEvents.forEach((event) => {
+          const eventDate = event.EventDate;
+          if (eventDate) {
+            // Track the most recent event date
+            if (!mostRecentDate || eventDate > mostRecentDate) {
+              mostRecentDate = eventDate;
+            }
+          }
+          
+          const timestamp = eventDate?.toISOString() || 'Unknown time';
+          const severity = event.Severity || 'INFO';
+          const message = event.Message || 'No message';
+
+          if (severity === 'ERROR' || severity === 'FATAL') {
+            core.error(`  [${timestamp}] ${severity}: ${message}`);
+            fatalOrErrorEvents.push({ message });
+          } else if (severity === 'WARN') {
+            core.warning(`  [${timestamp}] ${severity}: ${message}`);
+          } else {
+            core.info(`  [${timestamp}] ${severity}: ${message}`);
+          }
+        });
+
+        // Return error information if fatal/error events were found
+        if (fatalOrErrorEvents.length > 0) {
+          const errorMessage = fatalOrErrorEvents[0].message || 'Unknown error occurred';
+          return { hasError: true, errorMessage, lastEventDate: mostRecentDate };
         }
-      });
-
-      // Return error information if fatal/error events were found
-      if (fatalOrErrorEvents.length > 0) {
-        const errorMessage = fatalOrErrorEvents[0].message || 'Unknown error occurred';
-        return { hasError: true, errorMessage };
+        
+        return { hasError: false, lastEventDate: mostRecentDate };
       }
-    } else {
-      core.info('No recent events found');
     }
     
-    return { hasError: false };
+    // If no new events, return the last seen date (or undefined if first call)
+    return { hasError: false, lastEventDate: lastSeenEventDate };
   } catch (error) {
     // If we can't fetch events, don't fail the deployment check
     // Just log and continue
     core.debug(`Failed to fetch events: ${error}`);
-    return { hasError: false };
+    return { hasError: false, lastEventDate: lastSeenEventDate };
   }
 }
 
@@ -80,6 +100,7 @@ export async function waitForDeploymentCompletion(
   const startTime = Date.now();
   const maxWait = timeout * 1000;
   let previousStatus: string | undefined;
+  let lastSeenEventDate: Date | undefined;
   
   // Poll every 20 seconds for create, 10 seconds for update
   const pollInterval = deploymentActionType === 'create' ? 20000 : 10000;
@@ -106,8 +127,14 @@ export async function waitForDeploymentCompletion(
       const eventCheck = await describeRecentEvents(
         clients,
         applicationName,
-        environmentName
+        environmentName,
+        lastSeenEventDate
       );
+
+      // Update last seen event date for next iteration
+      if (eventCheck.lastEventDate) {
+        lastSeenEventDate = eventCheck.lastEventDate;
+      }
 
       if (eventCheck.hasError) {
         throw new Error(
@@ -127,7 +154,7 @@ export async function waitForDeploymentCompletion(
   }
 
   // Timeout occurred - fetch events to help diagnose
-  await describeRecentEvents(clients, applicationName, environmentName);
+  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
   throw new Error(`Deployment timed out after ${timeout}s`);
 }
 
@@ -146,6 +173,7 @@ export async function waitForHealthRecovery(
   const maxWait = timeout * 1000;
   let previousStatus: string | undefined;
   let previousHealth: string | undefined;
+  let lastSeenEventDate: Date | undefined;
 
   while (Date.now() - startTime < maxWait) {
     const command = new DescribeEnvironmentsCommand({
@@ -167,8 +195,14 @@ export async function waitForHealthRecovery(
         const eventCheck = await describeRecentEvents(
           clients,
           applicationName,
-          environmentName
+          environmentName,
+          lastSeenEventDate
         );
+
+        // Update last seen event date for next iteration
+        if (eventCheck.lastEventDate) {
+          lastSeenEventDate = eventCheck.lastEventDate;
+        }
 
         if (eventCheck.hasError) {
           throw new Error(
@@ -184,7 +218,7 @@ export async function waitForHealthRecovery(
 
       if (health === 'Red' && status === 'Ready') {
         // Fetch recent events to help diagnose the issue
-        await describeRecentEvents(clients, applicationName, environmentName);
+        await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
         throw new Error('Environment deployment failed - health is Red');
       }
 
@@ -201,6 +235,6 @@ export async function waitForHealthRecovery(
   }
 
   // Timeout occurred - fetch events to help diagnose
-  await describeRecentEvents(clients, applicationName, environmentName);
+  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
   throw new Error(`Environment health check timed out after ${timeout}s`);
 }
