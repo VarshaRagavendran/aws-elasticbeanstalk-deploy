@@ -95643,7 +95643,7 @@ async function run() {
         }
         if (waitForDeployment) {
             core.startGroup('⏳ Waiting for deployment');
-            await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout);
+            await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType);
             core.endGroup();
         }
         if (waitForEnvironmentRecovery) {
@@ -95716,7 +95716,8 @@ exports.waitForHealthRecovery = exports.waitForDeploymentCompletion = void 0;
 const core = __importStar(__nccwpck_require__(37484));
 const client_elastic_beanstalk_1 = __nccwpck_require__(76114);
 /**
- * Fetch recent environment events for debugging
+ * Fetch recent environment events for debugging and check for fatal/error events
+ * Returns error information if fatal/error events are found
  */
 async function describeRecentEvents(clients, applicationName, environmentName) {
     try {
@@ -95729,12 +95730,15 @@ async function describeRecentEvents(clients, applicationName, environmentName) {
         const response = await clients.getElasticBeanstalkClient().send(command);
         if (response.Events && response.Events.length > 0) {
             core.info('📋 Recent events:');
+            // Track fatal/error events while displaying all events
+            const fatalOrErrorEvents = [];
             response.Events.forEach((event) => {
                 const timestamp = event.EventDate?.toISOString() || 'Unknown time';
                 const severity = event.Severity || 'INFO';
                 const message = event.Message || 'No message';
                 if (severity === 'ERROR' || severity === 'FATAL') {
                     core.error(`  [${timestamp}] ${severity}: ${message}`);
+                    fatalOrErrorEvents.push({ message });
                 }
                 else if (severity === 'WARN') {
                     core.warning(`  [${timestamp}] ${severity}: ${message}`);
@@ -95743,53 +95747,34 @@ async function describeRecentEvents(clients, applicationName, environmentName) {
                     core.info(`  [${timestamp}] ${severity}: ${message}`);
                 }
             });
+            // Return error information if fatal/error events were found
+            if (fatalOrErrorEvents.length > 0) {
+                const errorMessage = fatalOrErrorEvents[0].message || 'Unknown error occurred';
+                return { hasError: true, errorMessage };
+            }
         }
         else {
             core.info('No recent events found');
-        }
-    }
-    catch (error) {
-        core.debug(`Failed to fetch events: ${error}`);
-    }
-}
-/**
- * Check for fatal or error events in recent environment events
- * Returns true if fatal/error events are found, false otherwise
- */
-async function checkForFatalOrErrorEvents(clients, applicationName, environmentName) {
-    try {
-        const command = new client_elastic_beanstalk_1.DescribeEventsCommand({
-            ApplicationName: applicationName,
-            EnvironmentName: environmentName,
-            MaxRecords: 10,
-        });
-        const response = await clients.getElasticBeanstalkClient().send(command);
-        if (response.Events && response.Events.length > 0) {
-            // Check for FATAL or ERROR severity events
-            const fatalOrErrorEvents = response.Events.filter((event) => event.Severity === 'ERROR' || event.Severity === 'FATAL');
-            if (fatalOrErrorEvents.length > 0) {
-                // Get the most recent fatal/error event message
-                const mostRecentError = fatalOrErrorEvents[0];
-                const errorMessage = mostRecentError.Message || 'Unknown error occurred';
-                return { hasError: true, errorMessage };
-            }
         }
         return { hasError: false };
     }
     catch (error) {
         // If we can't fetch events, don't fail the deployment check
         // Just log and continue
-        core.debug(`Failed to check for error events: ${error}`);
+        core.debug(`Failed to fetch events: ${error}`);
         return { hasError: false };
     }
 }
 /**
  * Wait for deployment to complete
  */
-async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout) {
+async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout, deploymentActionType) {
     core.info('⏳ Waiting for deployment to complete...');
     const startTime = Date.now();
     const maxWait = timeout * 1000;
+    let previousStatus;
+    // Poll every 20 seconds for create, 10 seconds for update
+    const pollInterval = deploymentActionType === 'create' ? 20000 : 10000;
     while (Date.now() - startTime < maxWait) {
         const command = new client_elastic_beanstalk_1.DescribeEnvironmentsCommand({
             ApplicationName: applicationName,
@@ -95803,10 +95788,20 @@ async function waitForDeploymentCompletion(clients, applicationName, environment
                 core.info('✅ Deployment complete');
                 return;
             }
-            core.info(`Current status: ${status}`);
+            // Check for fatal/error events during deployment
+            // This prevents getting stuck when errors occur during deployment
+            const eventCheck = await describeRecentEvents(clients, applicationName, environmentName);
+            if (eventCheck.hasError) {
+                throw new Error(`Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`);
+            }
+            // Only log when status changes
+            if (status !== previousStatus) {
+                core.info(`Current status: ${status}`);
+                previousStatus = status;
+            }
         }
-        // Wait 2 seconds before checking again
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Wait based on deployment action type
+        await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
     // Timeout occurred - fetch events to help diagnose
     await describeRecentEvents(clients, applicationName, environmentName);
@@ -95820,6 +95815,8 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
     core.info('🏥 Waiting for environment health to recover...');
     const startTime = Date.now();
     const maxWait = timeout * 1000;
+    let previousStatus;
+    let previousHealth;
     while (Date.now() - startTime < maxWait) {
         const command = new client_elastic_beanstalk_1.DescribeEnvironmentsCommand({
             ApplicationName: applicationName,
@@ -95834,10 +95831,8 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
             // This prevents getting stuck when errors occur during deployment
             // before health status changes to Red
             if (health === 'Grey' || health === undefined) {
-                const eventCheck = await checkForFatalOrErrorEvents(clients, applicationName, environmentName);
+                const eventCheck = await describeRecentEvents(clients, applicationName, environmentName);
                 if (eventCheck.hasError) {
-                    // Fetch and display recent events to help diagnose the issue
-                    await describeRecentEvents(clients, applicationName, environmentName);
                     throw new Error(`Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`);
                 }
             }
@@ -95850,7 +95845,12 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
                 await describeRecentEvents(clients, applicationName, environmentName);
                 throw new Error('Environment deployment failed - health is Red');
             }
-            core.info(`Current status: ${status}, health: ${health}`);
+            // Only log when status or health changes
+            if (status !== previousStatus || health !== previousHealth) {
+                core.info(`Current status: ${status}, health: ${health}`);
+                previousStatus = status;
+                previousHealth = health;
+            }
         }
         // Wait 15 seconds before checking again
         await new Promise(resolve => setTimeout(resolve, 15000));

@@ -7,13 +7,14 @@ import {
 import { AWSClients } from './aws-clients';
 
 /**
- * Fetch recent environment events for debugging
+ * Fetch recent environment events for debugging and check for fatal/error events
+ * Returns error information if fatal/error events are found
  */
 async function describeRecentEvents(
   clients: AWSClients,
   applicationName: string,
   environmentName: string
-): Promise<void> {
+): Promise<{ hasError: boolean; errorMessage?: string }> {
   try {
     core.info('🔍 Fetching most recent events...');
 
@@ -27,6 +28,10 @@ async function describeRecentEvents(
 
     if (response.Events && response.Events.length > 0) {
       core.info('📋 Recent events:');
+      
+      // Track fatal/error events while displaying all events
+      const fatalOrErrorEvents: Array<{ message: string }> = [];
+      
       response.Events.forEach((event) => {
         const timestamp = event.EventDate?.toISOString() || 'Unknown time';
         const severity = event.Severity || 'INFO';
@@ -34,56 +39,28 @@ async function describeRecentEvents(
 
         if (severity === 'ERROR' || severity === 'FATAL') {
           core.error(`  [${timestamp}] ${severity}: ${message}`);
+          fatalOrErrorEvents.push({ message });
         } else if (severity === 'WARN') {
           core.warning(`  [${timestamp}] ${severity}: ${message}`);
         } else {
           core.info(`  [${timestamp}] ${severity}: ${message}`);
         }
       });
+
+      // Return error information if fatal/error events were found
+      if (fatalOrErrorEvents.length > 0) {
+        const errorMessage = fatalOrErrorEvents[0].message || 'Unknown error occurred';
+        return { hasError: true, errorMessage };
+      }
     } else {
       core.info('No recent events found');
     }
-  } catch (error) {
-    core.debug(`Failed to fetch events: ${error}`);
-  }
-}
-
-/**
- * Check for fatal or error events in recent environment events
- * Returns true if fatal/error events are found, false otherwise
- */
-async function checkForFatalOrErrorEvents(
-  clients: AWSClients,
-  applicationName: string,
-  environmentName: string
-): Promise<{ hasError: boolean; errorMessage?: string }> {
-  try {
-    const command = new DescribeEventsCommand({
-      ApplicationName: applicationName,
-      EnvironmentName: environmentName,
-      MaxRecords: 10,
-    });
-
-    const response = await clients.getElasticBeanstalkClient().send(command);
-
-    if (response.Events && response.Events.length > 0) {
-      // Check for FATAL or ERROR severity events
-      const fatalOrErrorEvents = response.Events.filter(
-        (event) => event.Severity === 'ERROR' || event.Severity === 'FATAL'
-      );
-
-      if (fatalOrErrorEvents.length > 0) {
-        // Get the most recent fatal/error event message
-        const mostRecentError = fatalOrErrorEvents[0];
-        const errorMessage = mostRecentError.Message || 'Unknown error occurred';
-        return { hasError: true, errorMessage };
-      }
-    }
+    
     return { hasError: false };
   } catch (error) {
     // If we can't fetch events, don't fail the deployment check
     // Just log and continue
-    core.debug(`Failed to check for error events: ${error}`);
+    core.debug(`Failed to fetch events: ${error}`);
     return { hasError: false };
   }
 }
@@ -95,12 +72,17 @@ export async function waitForDeploymentCompletion(
   clients: AWSClients,
   applicationName: string,
   environmentName: string,
-  timeout: number
+  timeout: number,
+  deploymentActionType?: 'create' | 'update'
 ): Promise<void> {
   core.info('⏳ Waiting for deployment to complete...');
 
   const startTime = Date.now();
   const maxWait = timeout * 1000;
+  let previousStatus: string | undefined;
+  
+  // Poll every 20 seconds for create, 10 seconds for update
+  const pollInterval = deploymentActionType === 'create' ? 20000 : 10000;
 
   while (Date.now() - startTime < maxWait) {
     const command = new DescribeEnvironmentsCommand({
@@ -119,11 +101,29 @@ export async function waitForDeploymentCompletion(
         return;
       }
 
-      core.info(`Current status: ${status}`);
+      // Check for fatal/error events during deployment
+      // This prevents getting stuck when errors occur during deployment
+      const eventCheck = await describeRecentEvents(
+        clients,
+        applicationName,
+        environmentName
+      );
+
+      if (eventCheck.hasError) {
+        throw new Error(
+          `Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`
+        );
+      }
+
+      // Only log when status changes
+      if (status !== previousStatus) {
+        core.info(`Current status: ${status}`);
+        previousStatus = status;
+      }
     }
 
-    // Wait 2 seconds before checking again
-    await new Promise(resolve => setTimeout(resolve, 2000));
+    // Wait based on deployment action type
+    await new Promise(resolve => setTimeout(resolve, pollInterval));
   }
 
   // Timeout occurred - fetch events to help diagnose
@@ -144,6 +144,8 @@ export async function waitForHealthRecovery(
 
   const startTime = Date.now();
   const maxWait = timeout * 1000;
+  let previousStatus: string | undefined;
+  let previousHealth: string | undefined;
 
   while (Date.now() - startTime < maxWait) {
     const command = new DescribeEnvironmentsCommand({
@@ -162,15 +164,13 @@ export async function waitForHealthRecovery(
       // This prevents getting stuck when errors occur during deployment
       // before health status changes to Red
       if (health === 'Grey' || health === undefined) {
-        const eventCheck = await checkForFatalOrErrorEvents(
+        const eventCheck = await describeRecentEvents(
           clients,
           applicationName,
           environmentName
         );
 
         if (eventCheck.hasError) {
-          // Fetch and display recent events to help diagnose the issue
-          await describeRecentEvents(clients, applicationName, environmentName);
           throw new Error(
             `Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`
           );
@@ -188,7 +188,12 @@ export async function waitForHealthRecovery(
         throw new Error('Environment deployment failed - health is Red');
       }
 
-      core.info(`Current status: ${status}, health: ${health}`);
+      // Only log when status or health changes
+      if (status !== previousStatus || health !== previousHealth) {
+        core.info(`Current status: ${status}, health: ${health}`);
+        previousStatus = status;
+        previousHealth = health;
+      }
     }
 
     // Wait 15 seconds before checking again

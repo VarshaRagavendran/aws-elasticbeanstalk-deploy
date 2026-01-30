@@ -110,7 +110,7 @@ export async function run(): Promise<void> {
     );
     core.endGroup();
 
-    let deploymentActionType: string;
+    let deploymentActionType: 'create' | 'update';
 
     if (envExists) {
       core.startGroup('🔄 Updating environment');
@@ -152,7 +152,7 @@ export async function run(): Promise<void> {
 
     if (waitForDeployment) {
       core.startGroup('⏳ Waiting for deployment');
-      await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout);
+      await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType);
       core.endGroup();
     }
     if (waitForEnvironmentRecovery) {
