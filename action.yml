@@ -61,14 +61,14 @@ inputs:
     required: false
     default: 'true'
   s3-bucket-name:
-    description: 'S3 bucket name for deployment packages (defaults to elasticbeanstalk-{region}-{accountId})'
+    description: 'S3 bucket name for deployment packages (defaults to {applicationName}-{accountId})'
     required: false
   exclude-patterns:
     description: 'Comma-separated list of patterns to exclude from deployment package (e.g., "*.git*,*node_modules*,*.env*")'
     required: false
   option-settings:
-    description: 'Elastic Beanstalk option settings as JSON array. MUST include IAM settings: [{"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":"your-instance-profile"},{"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":"your-service-role"}]'
-    required: true
+    description: 'Elastic Beanstalk option settings as JSON array. Required when creating a new environment - MUST include IAM settings: [{"Namespace":"aws:autoscaling:launchconfiguration","OptionName":"IamInstanceProfile","Value":"your-instance-profile"},{"Namespace":"aws:elasticbeanstalk:environment","OptionName":"ServiceRole","Value":"your-service-role"}]'
+    required: false
 
 outputs:
   environment-url:

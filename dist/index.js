@@ -95267,7 +95267,7 @@ exports.verifyBucketOwnership = verifyBucketOwnership;
  * Upload deployment package to S3
  */
 async function uploadToS3(clients, region, accountId, applicationName, versionLabel, packagePath, maxRetries, retryDelay, createBucketIfNotExists, customBucketName) {
-    const bucket = customBucketName || `elasticbeanstalk-${region}-${accountId}`;
+    const bucket = customBucketName || `${applicationName}-${accountId}`;
     const packageExtension = path.extname(packagePath);
     const key = `${applicationName}/${versionLabel}${packageExtension}`;
     // Validate deployment package size
@@ -95391,27 +95391,9 @@ exports.updateEnvironment = updateEnvironment;
 /**
  * Create a new environment
  */
-async function createEnvironment(clients, applicationName, environmentName, versionLabel, customOptionSettings, solutionStackName, platformArn, iamInstanceProfile, serviceRole, maxRetries, retryDelay) {
+async function createEnvironment(clients, applicationName, environmentName, versionLabel, optionSettingsJson, solutionStackName, platformArn, maxRetries, retryDelay) {
     core.info(`🆕 Creating new environment: ${environmentName}`);
-    const baseOptionSettings = [
-        {
-            Namespace: 'aws:autoscaling:launchconfiguration',
-            OptionName: 'IamInstanceProfile',
-            Value: iamInstanceProfile,
-        },
-        {
-            Namespace: 'aws:elasticbeanstalk:environment',
-            OptionName: 'ServiceRole',
-            Value: serviceRole,
-        },
-    ];
-    let optionSettings = baseOptionSettings;
-    if (customOptionSettings) {
-        const customSettings = (0, validations_1.parseJsonInput)(customOptionSettings, 'option-settings');
-        if (Array.isArray(customSettings)) {
-            optionSettings = [...baseOptionSettings, ...customSettings];
-        }
-    }
+    const optionSettings = (0, validations_1.parseJsonInput)(optionSettingsJson, 'option-settings');
     await retryWithBackoff(async () => {
         const commandParams = {
             ApplicationName: applicationName,
@@ -95584,7 +95566,7 @@ async function run() {
         if (!inputs.valid) {
             return;
         }
-        const { awsRegion, applicationName, environmentName, applicationVersionLabel, deploymentPackagePath, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole, createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment, waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay, useExistingApplicationVersionIfAvailable, createS3BucketIfNotExists, s3BucketName, excludePatterns, optionSettings } = inputs;
+        const { awsRegion, applicationName, environmentName, applicationVersionLabel, deploymentPackagePath, solutionStackName, platformArn, createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment, waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay, useExistingApplicationVersionIfAvailable, createS3BucketIfNotExists, s3BucketName, excludePatterns, optionSettings } = inputs;
         core.startGroup('📋 Validating inputs');
         core.info(`Application: ${applicationName}`);
         core.info(`Environment: ${environmentName}`);
@@ -95638,12 +95620,8 @@ async function run() {
                 throw new Error(`Environment ${environmentName} does not exist and create-environment-if-not-exists is false`);
             }
             core.startGroup('🆕 Creating new environment');
-            // IAM roles are required for creating environments
-            if (!parsedIamInstanceProfile || !parsedServiceRole) {
-                throw new Error('IAM roles are required when creating a new environment. ' +
-                    'Please include IamInstanceProfile and ServiceRole in option-settings.');
-            }
-            await (0, aws_operations_1.createEnvironment)(clients, applicationName, environmentName, applicationVersionLabel, optionSettings, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole, maxRetries, retryDelay);
+            // optionSettings is guaranteed to be defined here (validated when createEnvironmentIfNotExists is true)
+            await (0, aws_operations_1.createEnvironment)(clients, applicationName, environmentName, applicationVersionLabel, optionSettings, solutionStackName, platformArn, maxRetries, retryDelay);
             deploymentActionType = 'create';
             core.endGroup();
         }
@@ -96003,7 +95981,7 @@ function validateRequiredInputs() {
     const environmentName = core.getInput('environment-name', { required: true });
     const solutionStackName = core.getInput('solution-stack-name') || undefined;
     const platformArn = core.getInput('platform-arn') || undefined;
-    const optionSettings = core.getInput('option-settings', { required: true });
+    const optionSettings = core.getInput('option-settings') || undefined;
     // Validate that either solution-stack-name OR platform-arn is provided, but not both
     if (!solutionStackName && !platformArn) {
         core.setFailed('Either solution-stack-name or platform-arn must be provided');
@@ -96052,15 +96030,19 @@ function validateRequiredInputs() {
         core.setFailed(`Environment name can only contain alphanumeric characters and hyphens, got: ${environmentName}`);
         return { valid: false };
     }
-    // Parse IAM roles from option settings (optional for updates, required for creates)
-    // We'll validate requirement later based on createEnvironmentIfNotExists flag
-    let parsedIamRoles;
-    try {
-        parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings, false);
-    }
-    catch (error) {
-        core.setFailed(error.message);
-        return { valid: false };
+    // Validate option-settings is valid JSON array if provided (IAM validation happens later if creating environment)
+    if (optionSettings) {
+        try {
+            const parsed = JSON.parse(optionSettings);
+            if (!Array.isArray(parsed)) {
+                core.setFailed('option-settings must be a JSON array');
+                return { valid: false };
+            }
+        }
+        catch (error) {
+            core.setFailed(`Invalid JSON in option-settings: ${error.message}`);
+            return { valid: false };
+        }
     }
     return {
         valid: true,
@@ -96069,9 +96051,7 @@ function validateRequiredInputs() {
         environmentName,
         solutionStackName,
         platformArn,
-        optionSettings,
-        parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile || undefined,
-        parsedServiceRole: parsedIamRoles.serviceRole || undefined
+        optionSettings
     };
 }
 function validateNumericInputs() {
@@ -96184,7 +96164,7 @@ function checkInputConflicts(inputs) {
     // Check if create-s3-bucket-if-not-exists is false
     if (inputs.createS3BucketIfNotExists === false) {
         core.warning('create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
-            'Ensure the bucket exists: elasticbeanstalk-<region>-<account-id>');
+            'Ensure the bucket exists: <application-name>-<account-id>');
     }
 }
 function validateAllInputs() {
@@ -96200,20 +96180,18 @@ function validateAllInputs() {
     if (!additionalInputs.valid) {
         return { valid: false };
     }
-    // Validate IAM roles are required only if creating environment
+    // Validate option-settings with IAM roles are provided if creating environment
     if (additionalInputs.createEnvironmentIfNotExists) {
-        if (!requiredInputs.parsedIamInstanceProfile || !requiredInputs.parsedServiceRole) {
-            if (!requiredInputs.optionSettings) {
-                core.setFailed('option-settings is required when creating a new environment');
-                return { valid: false };
-            }
-            try {
-                parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
-            }
-            catch (error) {
-                core.setFailed(error.message);
-                return { valid: false };
-            }
+        if (!requiredInputs.optionSettings) {
+            core.setFailed('option-settings is required when creating a new environment. Must include IamInstanceProfile and ServiceRole.');
+            return { valid: false };
+        }
+        try {
+            parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
+        }
+        catch (error) {
+            core.setFailed(error.message);
+            return { valid: false };
         }
     }
     const validatedInputs = {
@@ -96223,8 +96201,6 @@ function validateAllInputs() {
         environmentName: requiredInputs.environmentName,
         solutionStackName: requiredInputs.solutionStackName,
         platformArn: requiredInputs.platformArn,
-        parsedIamInstanceProfile: requiredInputs.parsedIamInstanceProfile,
-        parsedServiceRole: requiredInputs.parsedServiceRole,
         optionSettings: requiredInputs.optionSettings,
         deploymentTimeout: numericInputs.deploymentTimeout,
         maxRetries: numericInputs.maxRetries,

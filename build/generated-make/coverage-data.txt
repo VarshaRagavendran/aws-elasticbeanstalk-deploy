@@ -14,3 +14,11 @@ typescript:line:82.10922787193974
 typescript:branch:70.29702970297029
 typescript:line:81.49532710280374
 typescript:branch:68.93203883495146
+typescript:line:81.33086876155268
+typescript:branch:67.78846153846155
+typescript:line:80.88235294117648
+typescript:branch:67.46411483253588
+typescript:line:81.02189781021897
+typescript:branch:68.07511737089203
+typescript:line:81.02189781021897
+typescript:branch:68.07511737089203

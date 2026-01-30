@@ -239,7 +239,7 @@ export async function uploadToS3(
   createBucketIfNotExists: boolean,
   customBucketName?: string
 ): Promise<{ bucket: string; key: string }> {
-  const bucket = customBucketName || `elasticbeanstalk-${region}-${accountId}`;
+  const bucket = customBucketName || `${applicationName}-${accountId}`;
   const packageExtension = path.extname(packagePath);
   const key = `${applicationName}/${versionLabel}${packageExtension}`;
 
@@ -377,7 +377,7 @@ export async function updateEnvironment(
   applicationName: string,
   environmentName: string,
   versionLabel: string,
-  optionSettings: string,
+  optionSettings: string | undefined,
   solutionStackName: string | undefined,
   platformArn: string | undefined,
   maxRetries: number,
@@ -437,38 +437,15 @@ export async function createEnvironment(
   applicationName: string,
   environmentName: string,
   versionLabel: string,
-  customOptionSettings: string,
+  optionSettingsJson: string,
   solutionStackName: string | undefined,
   platformArn: string | undefined,
-  iamInstanceProfile: string,
-  serviceRole: string,
   maxRetries: number,
   retryDelay: number
 ): Promise<void> {
   core.info(`🆕 Creating new environment: ${environmentName}`);
 
-
-
-  const baseOptionSettings = [
-    {
-      Namespace: 'aws:autoscaling:launchconfiguration',
-      OptionName: 'IamInstanceProfile',
-      Value: iamInstanceProfile,
-    },
-    {
-      Namespace: 'aws:elasticbeanstalk:environment',
-      OptionName: 'ServiceRole',
-      Value: serviceRole,
-    },
-  ];
-
-  let optionSettings = baseOptionSettings;
-  if (customOptionSettings) {
-    const customSettings = parseJsonInput(customOptionSettings, 'option-settings');
-    if (Array.isArray(customSettings)) {
-      optionSettings = [...baseOptionSettings, ...customSettings];
-    }
-  }
+  const optionSettings = parseJsonInput(optionSettingsJson, 'option-settings');
 
   await retryWithBackoff(
     async () => {

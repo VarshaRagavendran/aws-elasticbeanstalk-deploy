@@ -19,9 +19,7 @@ export interface Inputs {
   createS3BucketIfNotExists: boolean;
   s3BucketName?: string;
   excludePatterns: string;
-  optionSettings: string;
-  parsedIamInstanceProfile?: string;
-  parsedServiceRole?: string;
+  optionSettings?: string;
 }
 
 export interface ParsedIamRoles {
@@ -82,7 +80,7 @@ function validateRequiredInputs() {
   const environmentName = core.getInput('environment-name', { required: true });
   const solutionStackName = core.getInput('solution-stack-name') || undefined;
   const platformArn = core.getInput('platform-arn') || undefined;
-  const optionSettings = core.getInput('option-settings', { required: true });
+  const optionSettings = core.getInput('option-settings') || undefined;
 
   // Validate that either solution-stack-name OR platform-arn is provided, but not both
   if (!solutionStackName && !platformArn) {
@@ -140,14 +138,18 @@ function validateRequiredInputs() {
     return { valid: false };
   }
 
-  // Parse IAM roles from option settings (optional for updates, required for creates)
-  // We'll validate requirement later based on createEnvironmentIfNotExists flag
-  let parsedIamRoles: ParsedIamRoles;
-  try {
-    parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings, false);
-  } catch (error) {
-    core.setFailed((error as Error).message);
-    return { valid: false };
+  // Validate option-settings is valid JSON array if provided (IAM validation happens later if creating environment)
+  if (optionSettings) {
+    try {
+      const parsed = JSON.parse(optionSettings);
+      if (!Array.isArray(parsed)) {
+        core.setFailed('option-settings must be a JSON array');
+        return { valid: false };
+      }
+    } catch (error) {
+      core.setFailed(`Invalid JSON in option-settings: ${(error as Error).message}`);
+      return { valid: false };
+    }
   }
 
   return {
@@ -157,9 +159,7 @@ function validateRequiredInputs() {
     environmentName,
     solutionStackName,
     platformArn,
-    optionSettings,
-    parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile || undefined,
-    parsedServiceRole: parsedIamRoles.serviceRole || undefined
+    optionSettings
   };
 }
 
@@ -305,7 +305,7 @@ function checkInputConflicts(inputs: Partial<Inputs>): void {
   if (inputs.createS3BucketIfNotExists === false) {
     core.warning(
       'create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
-      'Ensure the bucket exists: elasticbeanstalk-<region>-<account-id>'
+      'Ensure the bucket exists: <application-name>-<account-id>'
     );
   }
 }
@@ -326,19 +326,17 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
     return { valid: false };
   }
 
-  // Validate IAM roles are required only if creating environment
+  // Validate option-settings with IAM roles are provided if creating environment
   if (additionalInputs.createEnvironmentIfNotExists) {
-    if (!requiredInputs.parsedIamInstanceProfile || !requiredInputs.parsedServiceRole) {
-      if (!requiredInputs.optionSettings) {
-        core.setFailed('option-settings is required when creating a new environment');
-        return { valid: false };
-      }
-      try {
-        parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
-      } catch (error) {
-        core.setFailed((error as Error).message);
-        return { valid: false };
-      }
+    if (!requiredInputs.optionSettings) {
+      core.setFailed('option-settings is required when creating a new environment. Must include IamInstanceProfile and ServiceRole.');
+      return { valid: false };
+    }
+    try {
+      parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
+    } catch (error) {
+      core.setFailed((error as Error).message);
+      return { valid: false };
     }
   }
 
@@ -349,8 +347,6 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
     environmentName: requiredInputs.environmentName,
     solutionStackName: requiredInputs.solutionStackName,
     platformArn: requiredInputs.platformArn,
-    parsedIamInstanceProfile: requiredInputs.parsedIamInstanceProfile,
-    parsedServiceRole: requiredInputs.parsedServiceRole,
     optionSettings: requiredInputs.optionSettings,
     deploymentTimeout: numericInputs.deploymentTimeout,
     maxRetries: numericInputs.maxRetries,

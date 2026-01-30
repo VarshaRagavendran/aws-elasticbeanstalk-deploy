@@ -58,8 +58,6 @@ describe('Validation Functions', () => {
       expect(result.deploymentTimeout).toBe(900);
       expect(result.maxRetries).toBe(3);
       expect(result.retryDelay).toBe(5);
-      expect(result.parsedIamInstanceProfile).toBe('test-instance-profile');
-      expect(result.parsedServiceRole).toBe('test-service-role');
     });
 
     it('should fail validation for invalid aws-region format', () => {
@@ -303,14 +301,14 @@ describe('Validation Functions', () => {
       expect(result.retryDelay).toBe(5);
     });
 
-  it('should fail validation for missing option-settings', () => {
+  it('should pass validation for missing option-settings when not creating environment', () => {
     mockedCore.getInput.mockImplementation((name: string) => {
       const inputs: Record<string, string> = {
         'aws-region': 'us-east-1',
         'application-name': 'test-app',
         'environment-name': 'test-env',
         'solution-stack-name': '64bit Amazon Linux 2',
-        'option-settings': '', // Empty string should cause JSON parsing error
+        'option-settings': '', // Empty - optional when not creating environment
       };
       return inputs[name] || '';
     });
@@ -318,8 +316,29 @@ describe('Validation Functions', () => {
 
     const result = validateAllInputs();
 
+    expect(result.valid).toBe(true);
+  });
+
+  it('should fail validation for missing option-settings when creating environment', () => {
+    mockedCore.getInput.mockImplementation((name: string) => {
+      const inputs: Record<string, string> = {
+        'aws-region': 'us-east-1',
+        'application-name': 'test-app',
+        'environment-name': 'test-env',
+        'solution-stack-name': '64bit Amazon Linux 2',
+        'option-settings': '', // Empty - required when creating environment
+      };
+      return inputs[name] || '';
+    });
+    // create-environment-if-not-exists is true
+    mockedCore.getBooleanInput.mockImplementation((name: string) => {
+      return name === 'create-environment-if-not-exists';
+    });
+
+    const result = validateAllInputs();
+
     expect(result.valid).toBe(false);
-    expect(mockedCore.setFailed).toHaveBeenCalledWith('Invalid JSON in option-settings: Unexpected end of JSON input');
+    expect(mockedCore.setFailed).toHaveBeenCalledWith('option-settings is required when creating a new environment. Must include IamInstanceProfile and ServiceRole.');
   });
 
     it('should handle boolean inputs', () => {
@@ -391,7 +410,7 @@ describe('Validation Functions', () => {
       expect(result.applicationVersionLabel).toBe('test-sha-123');
     });
 
-    it('should fail validation for missing service role in option-settings', () => {
+    it('should fail validation for missing service role in option-settings when creating environment', () => {
       const invalidOptionSettings = JSON.stringify([
         {
           "Namespace": "aws:autoscaling:launchconfiguration",
@@ -411,7 +430,10 @@ describe('Validation Functions', () => {
         };
         return inputs[name] || '';
       });
-      mockedCore.getBooleanInput.mockReturnValue(false);
+      // IAM roles are only required when creating environment
+      mockedCore.getBooleanInput.mockImplementation((name: string) => {
+        return name === 'create-environment-if-not-exists';
+      });
 
       const result = validateAllInputs();
 
@@ -419,7 +441,7 @@ describe('Validation Functions', () => {
       expect(mockedCore.setFailed).toHaveBeenCalledWith('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
     });
 
-    it('should fail validation for missing instance profile in option-settings', () => {
+    it('should fail validation for missing instance profile in option-settings when creating environment', () => {
       const invalidOptionSettings = JSON.stringify([
         {
           "Namespace": "aws:elasticbeanstalk:environment",
@@ -439,7 +461,10 @@ describe('Validation Functions', () => {
         };
         return inputs[name] || '';
       });
-      mockedCore.getBooleanInput.mockReturnValue(false);
+      // IAM roles are only required when creating environment
+      mockedCore.getBooleanInput.mockImplementation((name: string) => {
+        return name === 'create-environment-if-not-exists';
+      });
 
       const result = validateAllInputs();
 
@@ -564,8 +589,6 @@ describe('Validation Functions', () => {
       expect(result.environmentName).toBe('test-env');
       expect(result.platformArn).toBe('arn:aws:elasticbeanstalk:us-east-1::platform/Python 3.11 running on 64bit Amazon Linux 2023/4.3.0');
       expect(result.solutionStackName).toBeUndefined();
-      expect(result.parsedIamInstanceProfile).toBe('test-instance-profile');
-      expect(result.parsedServiceRole).toBe('test-service-role');
     });
 
     it('should fail validation for invalid platform-arn format', () => {

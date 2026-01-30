@@ -17,9 +17,7 @@ export interface Inputs {
     createS3BucketIfNotExists: boolean;
     s3BucketName?: string;
     excludePatterns: string;
-    optionSettings: string;
-    parsedIamInstanceProfile?: string;
-    parsedServiceRole?: string;
+    optionSettings?: string;
 }
 export interface ParsedIamRoles {
     iamInstanceProfile: string;

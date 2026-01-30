@@ -59,11 +59,11 @@ export declare function createApplicationVersion(clients: AWSClients, applicatio
 /**
  * Update an existing environment
  */
-export declare function updateEnvironment(clients: AWSClients, applicationName: string, environmentName: string, versionLabel: string, optionSettings: string, solutionStackName: string | undefined, platformArn: string | undefined, maxRetries: number, retryDelay: number): Promise<void>;
+export declare function updateEnvironment(clients: AWSClients, applicationName: string, environmentName: string, versionLabel: string, optionSettings: string | undefined, solutionStackName: string | undefined, platformArn: string | undefined, maxRetries: number, retryDelay: number): Promise<void>;
 /**
  * Create a new environment
  */
-export declare function createEnvironment(clients: AWSClients, applicationName: string, environmentName: string, versionLabel: string, customOptionSettings: string, solutionStackName: string | undefined, platformArn: string | undefined, iamInstanceProfile: string, serviceRole: string, maxRetries: number, retryDelay: number): Promise<void>;
+export declare function createEnvironment(clients: AWSClients, applicationName: string, environmentName: string, versionLabel: string, optionSettingsJson: string, solutionStackName: string | undefined, platformArn: string | undefined, maxRetries: number, retryDelay: number): Promise<void>;
 /**
  * Verify IAM roles exist
 /**

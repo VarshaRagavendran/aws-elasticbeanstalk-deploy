@@ -28,7 +28,7 @@ export async function run(): Promise<void> {
 
     const {
       awsRegion, applicationName, environmentName, applicationVersionLabel,
-      deploymentPackagePath, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole,
+      deploymentPackagePath, solutionStackName, platformArn,
       createEnvironmentIfNotExists, createApplicationIfNotExists, waitForDeployment,
       waitForEnvironmentRecovery, deploymentTimeout, maxRetries, retryDelay,
       useExistingApplicationVersionIfAvailable, createS3BucketIfNotExists, s3BucketName, excludePatterns,
@@ -135,24 +135,15 @@ export async function run(): Promise<void> {
 
       core.startGroup('🆕 Creating new environment');
       
-      // IAM roles are required for creating environments
-      if (!parsedIamInstanceProfile || !parsedServiceRole) {
-        throw new Error(
-          'IAM roles are required when creating a new environment. ' +
-          'Please include IamInstanceProfile and ServiceRole in option-settings.'
-        );
-      }
-      
+      // optionSettings is guaranteed to be defined here (validated when createEnvironmentIfNotExists is true)
       await createEnvironment(
         clients,
         applicationName,
         environmentName,
         applicationVersionLabel,
-        optionSettings,
+        optionSettings!,
         solutionStackName,
         platformArn,
-        parsedIamInstanceProfile,
-        parsedServiceRole,
         maxRetries,
         retryDelay
       );
