@@ -136,6 +136,14 @@ export async function waitForDeploymentCompletion(
       const status = env.Status;
 
       if (status === 'Ready') {
+        // Fetch and display final events before completing
+        await describeRecentEvents(
+          clients,
+          applicationName,
+          environmentName,
+          lastSeenEventDate,
+          deploymentStartTime
+        );
         core.info('✅ Deployment complete');
         return;
       }

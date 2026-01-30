@@ -95817,6 +95817,8 @@ async function waitForDeploymentCompletion(clients, applicationName, environment
             const env = response.Environments[0];
             const status = env.Status;
             if (status === 'Ready') {
+                // Fetch and display final events before completing
+                await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
                 core.info('✅ Deployment complete');
                 return;
             }
