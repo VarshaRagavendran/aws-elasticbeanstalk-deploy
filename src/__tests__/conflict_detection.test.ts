@@ -83,42 +83,6 @@ describe('Input Conflict Detection', () => {
     );
   });
 
-  it('should info when deployment-package is provided without exclude-patterns', () => {
-    const validOptionSettings = JSON.stringify([
-      {
-        "Namespace": "aws:autoscaling:launchconfiguration",
-        "OptionName": "IamInstanceProfile",
-        "Value": "test-profile"
-      },
-      {
-        "Namespace": "aws:elasticbeanstalk:environment",
-        "OptionName": "ServiceRole",
-        "Value": "test-role"
-      }
-    ]);
-
-    mockedCore.getInput.mockImplementation((name: string) => {
-      const inputs: Record<string, string> = {
-        'aws-region': 'us-east-1',
-        'application-name': 'test-app',
-        'environment-name': 'test-env',
-        'solution-stack-name': '64bit Amazon Linux 2023',
-        'deployment-package-path': 'my-app.zip',
-        'deployment-timeout': '900',
-        'max-retries': '3',
-        'retry-delay': '5',
-        'option-settings': validOptionSettings,
-      };
-      return inputs[name] || '';
-    });
-
-    validateAllInputs();
-
-    expect(mockedCore.info).toHaveBeenCalledWith(
-      expect.stringContaining('deployment-package-path is specified without exclude-patterns')
-    );
-  });
-
   it('should warn when create-application-if-not-exists is true but create-environment-if-not-exists is false', () => {
     mockedCore.getBooleanInput.mockImplementation((name: string) => {
       if (name === 'create-application-if-not-exists') return true;

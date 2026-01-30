@@ -256,6 +256,38 @@ Two IAM roles must exist in your AWS account and passed in as part of the option
 
 You can create these roles using the [AWS Console setup wizard](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html#iam-instanceprofile-create).
 
+### IAM User Permissions
+
+The IAM user used for deployment must have the **AdministratorAccess-AWSElasticBeanstalk** AWS managed policy attached. This policy grants the necessary permissions for Elastic Beanstalk to create and manage your environment.
+
+Additionally, the IAM user must have S3 permissions for the deployment bucket. The bucket name is either:
+
+- **Custom bucket**: The value you pass to `s3-bucket-name`
+- **Default bucket**: `{applicationName}-{accountId}` (e.g., `my-app-123456789012`)
+
+Add the following S3 policy to your IAM user:
+
+```json
+{
+    "Effect": "Allow",
+    "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:CreateBucket",
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetBucketAcl",
+        "s3:PutObject"
+    ],
+    "Resource": [
+        "arn:aws:s3:::{bucket-name}",
+        "arn:aws:s3:::{bucket-name}/*"
+    ]
+}
+```
+
+Replace `{bucket-name}` with your custom bucket name or `{applicationName}-{accountId}` for the default.
+
 ## Advanced Configuration
 
 ### Option Settings

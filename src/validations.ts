@@ -260,15 +260,6 @@ function getAdditionalInputs() {
 }
 
 function checkInputConflicts(inputs: Partial<Inputs>): void {
-  // Check if deployment-package-path is provided without exclude-patterns
-  if (inputs.deploymentPackagePath && inputs.deploymentPackagePath.trim() !== '' &&
-      (!inputs.excludePatterns || inputs.excludePatterns.trim() === '')) {
-    core.info(
-      'deployment-package-path is specified without exclude-patterns. ' +
-      'The pre-built package will be used as-is. If you want to auto-create a package, remove deployment-package-path.'
-    );
-  }
-
   // Check if deployment-package-path is provided WITH exclude-patterns
   if (inputs.deploymentPackagePath && inputs.deploymentPackagePath.trim() !== '' &&
       inputs.excludePatterns && inputs.excludePatterns.trim() !== '') {
