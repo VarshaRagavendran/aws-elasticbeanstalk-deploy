@@ -10,12 +10,14 @@ import { AWSClients } from './aws-clients';
  * Fetch recent environment events for debugging and check for fatal/error events
  * Returns error information if fatal/error events are found
  * Only displays events newer than lastSeenEventDate to avoid duplicates
+ * Only shows events that occurred after deploymentStartTime to filter out old events
  */
 async function describeRecentEvents(
   clients: AWSClients,
   applicationName: string,
   environmentName: string,
-  lastSeenEventDate?: Date
+  lastSeenEventDate?: Date,
+  deploymentStartTime?: Date
 ): Promise<{ hasError: boolean; errorMessage?: string; lastEventDate?: Date }> {
   try {
     const command = new DescribeEventsCommand({
@@ -27,16 +29,31 @@ async function describeRecentEvents(
     const response = await clients.getElasticBeanstalkClient().send(command);
 
     if (response.Events && response.Events.length > 0) {
-      // Filter to only new events (those after lastSeenEventDate)
-      const newEvents = lastSeenEventDate
-        ? response.Events.filter((event) => {
-            const eventDate = event.EventDate;
-            return eventDate && eventDate > lastSeenEventDate;
-          })
-        : response.Events;
+      // Filter to only events relevant to this deployment:
+      // 1. Events after deploymentStartTime (if provided)
+      // 2. Events after lastSeenEventDate (to avoid duplicates)
+      const newEvents = response.Events.filter((event) => {
+        const eventDate = event.EventDate;
+        if (!eventDate) return false;
+        
+        // Must be after deployment start time
+        if (deploymentStartTime && eventDate <= deploymentStartTime) {
+          return false;
+        }
+        
+        // Must be after last seen event date
+        if (lastSeenEventDate && eventDate <= lastSeenEventDate) {
+          return false;
+        }
+        
+        return true;
+      });
 
       if (newEvents.length > 0) {
-        core.info('📋 Recent events:');
+        // Only show header on first call (when lastSeenEventDate is undefined)
+        if (!lastSeenEventDate) {
+          core.info('📋 Recent events:');
+        }
         
         // Track fatal/error events while displaying all events
         const fatalOrErrorEvents: Array<{ message: string }> = [];
@@ -93,7 +110,8 @@ export async function waitForDeploymentCompletion(
   applicationName: string,
   environmentName: string,
   timeout: number,
-  deploymentActionType?: 'create' | 'update'
+  deploymentActionType?: 'create' | 'update',
+  deploymentStartTime?: Date
 ): Promise<void> {
   core.info('⏳ Waiting for deployment to complete...');
 
@@ -128,13 +146,13 @@ export async function waitForDeploymentCompletion(
         clients,
         applicationName,
         environmentName,
-        lastSeenEventDate
+        lastSeenEventDate,
+        deploymentStartTime
       );
 
       // Update last seen event date for next iteration
-      if (eventCheck.lastEventDate) {
-        lastSeenEventDate = eventCheck.lastEventDate;
-      }
+      // Always update, even if undefined (preserves the state)
+      lastSeenEventDate = eventCheck.lastEventDate;
 
       if (eventCheck.hasError) {
         throw new Error(
@@ -154,7 +172,7 @@ export async function waitForDeploymentCompletion(
   }
 
   // Timeout occurred - fetch events to help diagnose
-  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
   throw new Error(`Deployment timed out after ${timeout}s`);
 }
 
@@ -165,7 +183,8 @@ export async function waitForHealthRecovery(
   clients: AWSClients,
   applicationName: string,
   environmentName: string,
-  timeout: number
+  timeout: number,
+  deploymentStartTime?: Date
 ): Promise<void> {
   core.info('🏥 Waiting for environment health to recover...');
 
@@ -196,13 +215,13 @@ export async function waitForHealthRecovery(
           clients,
           applicationName,
           environmentName,
-          lastSeenEventDate
+          lastSeenEventDate,
+          deploymentStartTime
         );
 
         // Update last seen event date for next iteration
-        if (eventCheck.lastEventDate) {
-          lastSeenEventDate = eventCheck.lastEventDate;
-        }
+        // Always update, even if undefined (preserves the state)
+        lastSeenEventDate = eventCheck.lastEventDate;
 
         if (eventCheck.hasError) {
           throw new Error(
@@ -218,7 +237,7 @@ export async function waitForHealthRecovery(
 
       if (health === 'Red' && status === 'Ready') {
         // Fetch recent events to help diagnose the issue
-        await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+        await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
         throw new Error('Environment deployment failed - health is Red');
       }
 
@@ -235,6 +254,6 @@ export async function waitForHealthRecovery(
   }
 
   // Timeout occurred - fetch events to help diagnose
-  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+  await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
   throw new Error(`Environment health check timed out after ${timeout}s`);
 }

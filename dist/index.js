@@ -95626,6 +95626,7 @@ async function run() {
         const { exists: envExists } = await (0, aws_operations_1.environmentExists)(clients, applicationName, environmentName);
         core.endGroup();
         let deploymentActionType;
+        const deploymentStartTime = new Date();
         if (envExists) {
             core.startGroup('🔄 Updating environment');
             await (0, aws_operations_1.updateEnvironment)(clients, applicationName, environmentName, applicationVersionLabel, optionSettings, solutionStackName, platformArn, maxRetries, retryDelay);
@@ -95643,12 +95644,12 @@ async function run() {
         }
         if (waitForDeployment) {
             core.startGroup('⏳ Waiting for deployment');
-            await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType);
+            await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
             core.endGroup();
         }
         if (waitForEnvironmentRecovery) {
             core.startGroup('🏥 Waiting for environment health');
-            await (0, monitoring_1.waitForHealthRecovery)(clients, applicationName, environmentName, deploymentTimeout);
+            await (0, monitoring_1.waitForHealthRecovery)(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime);
             core.endGroup();
         }
         const envInfo = await (0, aws_operations_1.getEnvironmentInfo)(clients, applicationName, environmentName);
@@ -95719,8 +95720,9 @@ const client_elastic_beanstalk_1 = __nccwpck_require__(76114);
  * Fetch recent environment events for debugging and check for fatal/error events
  * Returns error information if fatal/error events are found
  * Only displays events newer than lastSeenEventDate to avoid duplicates
+ * Only shows events that occurred after deploymentStartTime to filter out old events
  */
-async function describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate) {
+async function describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime) {
     try {
         const command = new client_elastic_beanstalk_1.DescribeEventsCommand({
             ApplicationName: applicationName,
@@ -95729,15 +95731,28 @@ async function describeRecentEvents(clients, applicationName, environmentName, l
         });
         const response = await clients.getElasticBeanstalkClient().send(command);
         if (response.Events && response.Events.length > 0) {
-            // Filter to only new events (those after lastSeenEventDate)
-            const newEvents = lastSeenEventDate
-                ? response.Events.filter((event) => {
-                    const eventDate = event.EventDate;
-                    return eventDate && eventDate > lastSeenEventDate;
-                })
-                : response.Events;
+            // Filter to only events relevant to this deployment:
+            // 1. Events after deploymentStartTime (if provided)
+            // 2. Events after lastSeenEventDate (to avoid duplicates)
+            const newEvents = response.Events.filter((event) => {
+                const eventDate = event.EventDate;
+                if (!eventDate)
+                    return false;
+                // Must be after deployment start time
+                if (deploymentStartTime && eventDate <= deploymentStartTime) {
+                    return false;
+                }
+                // Must be after last seen event date
+                if (lastSeenEventDate && eventDate <= lastSeenEventDate) {
+                    return false;
+                }
+                return true;
+            });
             if (newEvents.length > 0) {
-                core.info('📋 Recent events:');
+                // Only show header on first call (when lastSeenEventDate is undefined)
+                if (!lastSeenEventDate) {
+                    core.info('📋 Recent events:');
+                }
                 // Track fatal/error events while displaying all events
                 const fatalOrErrorEvents = [];
                 let mostRecentDate;
@@ -95784,7 +95799,7 @@ async function describeRecentEvents(clients, applicationName, environmentName, l
 /**
  * Wait for deployment to complete
  */
-async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout, deploymentActionType) {
+async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout, deploymentActionType, deploymentStartTime) {
     core.info('⏳ Waiting for deployment to complete...');
     const startTime = Date.now();
     const maxWait = timeout * 1000;
@@ -95807,11 +95822,10 @@ async function waitForDeploymentCompletion(clients, applicationName, environment
             }
             // Check for fatal/error events during deployment
             // This prevents getting stuck when errors occur during deployment
-            const eventCheck = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+            const eventCheck = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
             // Update last seen event date for next iteration
-            if (eventCheck.lastEventDate) {
-                lastSeenEventDate = eventCheck.lastEventDate;
-            }
+            // Always update, even if undefined (preserves the state)
+            lastSeenEventDate = eventCheck.lastEventDate;
             if (eventCheck.hasError) {
                 throw new Error(`Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`);
             }
@@ -95825,14 +95839,14 @@ async function waitForDeploymentCompletion(clients, applicationName, environment
         await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
     // Timeout occurred - fetch events to help diagnose
-    await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+    await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
     throw new Error(`Deployment timed out after ${timeout}s`);
 }
 exports.waitForDeploymentCompletion = waitForDeploymentCompletion;
 /**
  * Wait for environment health to recover
  */
-async function waitForHealthRecovery(clients, applicationName, environmentName, timeout) {
+async function waitForHealthRecovery(clients, applicationName, environmentName, timeout, deploymentStartTime) {
     core.info('🏥 Waiting for environment health to recover...');
     const startTime = Date.now();
     const maxWait = timeout * 1000;
@@ -95853,11 +95867,10 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
             // This prevents getting stuck when errors occur during deployment
             // before health status changes to Red
             if (health === 'Grey' || health === undefined) {
-                const eventCheck = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+                const eventCheck = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
                 // Update last seen event date for next iteration
-                if (eventCheck.lastEventDate) {
-                    lastSeenEventDate = eventCheck.lastEventDate;
-                }
+                // Always update, even if undefined (preserves the state)
+                lastSeenEventDate = eventCheck.lastEventDate;
                 if (eventCheck.hasError) {
                     throw new Error(`Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`);
                 }
@@ -95868,7 +95881,7 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
             }
             if (health === 'Red' && status === 'Ready') {
                 // Fetch recent events to help diagnose the issue
-                await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+                await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
                 throw new Error('Environment deployment failed - health is Red');
             }
             // Only log when status or health changes
@@ -95882,7 +95895,7 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
         await new Promise(resolve => setTimeout(resolve, 15000));
     }
     // Timeout occurred - fetch events to help diagnose
-    await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate);
+    await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
     throw new Error(`Environment health check timed out after ${timeout}s`);
 }
 exports.waitForHealthRecovery = waitForHealthRecovery;

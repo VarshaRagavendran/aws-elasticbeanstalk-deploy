@@ -111,6 +111,7 @@ export async function run(): Promise<void> {
     core.endGroup();
 
     let deploymentActionType: 'create' | 'update';
+    const deploymentStartTime = new Date();
 
     if (envExists) {
       core.startGroup('🔄 Updating environment');
@@ -152,12 +153,12 @@ export async function run(): Promise<void> {
 
     if (waitForDeployment) {
       core.startGroup('⏳ Waiting for deployment');
-      await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType);
+      await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
       core.endGroup();
     }
     if (waitForEnvironmentRecovery) {
       core.startGroup('🏥 Waiting for environment health');
-      await waitForHealthRecovery(clients, applicationName, environmentName, deploymentTimeout);
+      await waitForHealthRecovery(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime);
       core.endGroup();
     }
 

@@ -6,3 +6,7 @@ typescript:line:82.66666666666667
 typescript:branch:71
 typescript:line:82.66666666666667
 typescript:branch:71
+typescript:line:82.50950570342205
+typescript:branch:70.64676616915423
+typescript:line:82.0754716981132
+typescript:branch:70.29702970297029
