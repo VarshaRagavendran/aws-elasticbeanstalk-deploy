@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">87.68% </span>
+                <span class="strong">87.76% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>121/138</span>
+                <span class='fraction'>122/139</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">87.5% </span>
+                <span class="strong">87.8% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>70/80</span>
+                <span class='fraction'>72/82</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">87.68% </span>
+                <span class="strong">87.76% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>121/138</span>
+                <span class='fraction'>122/139</span>
             </div>
         
             
@@ -420,7 +420,12 @@
 <a name='L355'></a><a href='#L355'>355</a>
 <a name='L356'></a><a href='#L356'>356</a>
 <a name='L357'></a><a href='#L357'>357</a>
-<a name='L358'></a><a href='#L358'>358</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">5x</span>
+<a name='L358'></a><a href='#L358'>358</a>
+<a name='L359'></a><a href='#L359'>359</a>
+<a name='L360'></a><a href='#L360'>360</a>
+<a name='L361'></a><a href='#L361'>361</a>
+<a name='L362'></a><a href='#L362'>362</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -646,6 +651,7 @@
 <span class="cline-any cline-yes">19x</span>
 <span class="cline-any cline-yes">19x</span>
 <span class="cline-any cline-yes">19x</span>
+<span class="cline-any cline-yes">19x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">19x</span>
@@ -661,6 +667,7 @@
 <span class="cline-any cline-yes">19x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">19x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -765,6 +772,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">19x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">19x</span>
@@ -795,7 +803,8 @@ export interface Inputs {
   maxRetries: number;
   retryDelay: number;
   useExistingApplicationVersionIfAvailable: boolean;
-  creates3BucketIfNotExists: boolean;
+  createS3BucketIfNotExists: boolean;
+  s3BucketName?: string;
   excludePatterns: string;
   optionSettings: string;
   parsedIamInstanceProfile: string;
@@ -1003,6 +1012,7 @@ function getAdditionalInputs() {
   const applicationVersionLabel = core.getInput('version-label') || process.env.GITHUB_SHA || `v${Date.now()}`;
   const deploymentPackagePath = core.getInput('deployment-package-path');
   const excludePatterns = core.getInput('exclude-patterns') || '';
+  const s3BucketName = core.getInput('s3-bucket-name') || undefined;
 &nbsp;
   // Validate version label length
   <span class="missing-if-branch" title="if path not taken" >I</span>if (applicationVersionLabel.length &lt; 1 || applicationVersionLabel.length &gt; 100) {
@@ -1015,7 +1025,7 @@ function getAdditionalInputs() {
   const waitForDeployment = core.getBooleanInput('wait-for-deployment');
   const waitForEnvironmentRecovery = core.getBooleanInput('wait-for-environment-recovery');
   const useExistingApplicationVersionIfAvailable = core.getBooleanInput('use-existing-application-version-if-available');
-  const creates3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
+  const createS3BucketIfNotExists = core.getBooleanInput('create-s3-bucket-if-not-exists');
 &nbsp;
   return {
     valid: true,
@@ -1026,7 +1036,8 @@ function getAdditionalInputs() {
     waitForDeployment,
     waitForEnvironmentRecovery,
     useExistingApplicationVersionIfAvailable,
-    creates3BucketIfNotExists,
+    createS3BucketIfNotExists,
+    s3BucketName,
     excludePatterns
   };
 }
@@ -1074,7 +1085,7 @@ function checkInputConflicts(inputs: Partial&lt;Inputs&gt;): void {
   }
 &nbsp;
   // Check if create-s3-bucket-if-not-exists is false
-  if (inputs.creates3BucketIfNotExists === false) {
+  if (inputs.createS3BucketIfNotExists === false) {
     core.warning(
       'create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
       'Ensure the bucket exists: elasticbeanstalk-&lt;region&gt;-&lt;account-id&gt;'
@@ -1118,7 +1129,8 @@ export function validateAllInputs(): { valid: boolean } &amp; Partial&lt;Inputs&
     waitForDeployment: additionalInputs.waitForDeployment!,
     waitForEnvironmentRecovery: additionalInputs.waitForEnvironmentRecovery!,
     useExistingApplicationVersionIfAvailable: additionalInputs.useExistingApplicationVersionIfAvailable!,
-    creates3BucketIfNotExists: additionalInputs.creates3BucketIfNotExists!,
+    createS3BucketIfNotExists: additionalInputs.createS3BucketIfNotExists!,
+    s3BucketName: additionalInputs.s3BucketName,
     excludePatterns: additionalInputs.excludePatterns!
   };
 &nbsp;
@@ -1141,7 +1153,7 @@ export function parseJsonInput(jsonString: string, inputName: string) {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-28T19:36:38.706Z
+                at 2026-01-30T01:12:35.598Z
             </div>
         <script src="../prettify.js"></script>
         <script>

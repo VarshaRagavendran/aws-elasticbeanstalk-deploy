@@ -49,6 +49,46 @@ async function describeRecentEvents(
 }
 
 /**
+ * Check for fatal or error events in recent environment events
+ * Returns true if fatal/error events are found, false otherwise
+ */
+async function checkForFatalOrErrorEvents(
+  clients: AWSClients,
+  applicationName: string,
+  environmentName: string
+): Promise<{ hasError: boolean; errorMessage?: string }> {
+  try {
+    const command = new DescribeEventsCommand({
+      ApplicationName: applicationName,
+      EnvironmentName: environmentName,
+      MaxRecords: 10,
+    });
+
+    const response = await clients.getElasticBeanstalkClient().send(command);
+
+    if (response.Events && response.Events.length > 0) {
+      // Check for FATAL or ERROR severity events
+      const fatalOrErrorEvents = response.Events.filter(
+        (event) => event.Severity === 'ERROR' || event.Severity === 'FATAL'
+      );
+
+      if (fatalOrErrorEvents.length > 0) {
+        // Get the most recent fatal/error event message
+        const mostRecentError = fatalOrErrorEvents[0];
+        const errorMessage = mostRecentError.Message || 'Unknown error occurred';
+        return { hasError: true, errorMessage };
+      }
+    }
+    return { hasError: false };
+  } catch (error) {
+    // If we can't fetch events, don't fail the deployment check
+    // Just log and continue
+    core.debug(`Failed to check for error events: ${error}`);
+    return { hasError: false };
+  }
+}
+
+/**
  * Wait for deployment to complete
  */
 export async function waitForDeploymentCompletion(
@@ -117,6 +157,25 @@ export async function waitForHealthRecovery(
       const env = response.Environments[0];
       const health = env.Health;
       const status = env.Status;
+
+      // Only check for fatal/error events when health is Grey
+      // This prevents getting stuck when errors occur during deployment
+      // before health status changes to Red
+      if (health === 'Grey' || health === undefined) {
+        const eventCheck = await checkForFatalOrErrorEvents(
+          clients,
+          applicationName,
+          environmentName
+        );
+
+        if (eventCheck.hasError) {
+          // Fetch and display recent events to help diagnose the issue
+          await describeRecentEvents(clients, applicationName, environmentName);
+          throw new Error(
+            `Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`
+          );
+        }
+      }
 
       if (health === 'Green' || health === 'Yellow') {
         core.info('✅ Environment is healthy!');

@@ -279,21 +279,23 @@ describe('Main Functions', () => {
     it('should create environment', async () => {
       mockSend.mockResolvedValue({});
       await createEnvironment(mockClients, 'app', 'env', 'v1.0.0', '', 'stack', undefined, 'profile', 'role', 3, 1);
-      expect(mockSend).toHaveBeenCalledTimes(3); // 2 IAM checks + 1 create
+      expect(mockSend).toHaveBeenCalledTimes(1); // 1 create
     });
 
     it('should create environment with custom options', async () => {
       mockSend.mockResolvedValue({});
       await createEnvironment(mockClients, 'app', 'env', 'v1.0.0', '[{"Namespace":"test","OptionName":"test","Value":"test"}]', 'stack', undefined, 'profile', 'role', 3, 1);
-      expect(mockSend).toHaveBeenCalledTimes(3);
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('waitForDeploymentCompletion', () => {
     it('should wait for deployment', async () => {
-      mockWaitUntil.mockResolvedValue({});
+      mockSend.mockResolvedValue({
+        Environments: [{ Status: 'Ready' }],
+      });
       await waitForDeploymentCompletion(mockClients, 'app', 'env', 900);
-      expect(mockWaitUntil).toHaveBeenCalled();
+      expect(mockSend).toHaveBeenCalled();
     });
   });
 
@@ -435,10 +437,8 @@ describe('Main Functions', () => {
         if (callCount === 5) return Promise.resolve({});  // PutObject
         if (callCount === 6) return Promise.resolve({});  // CreateAppVersion
         if (callCount === 7) return Promise.resolve({ Environments: [] });  // DescribeEnvironment (no env found)
-        if (callCount === 8) return Promise.resolve({});  // GetInstanceProfile
-        if (callCount === 9) return Promise.resolve({});  // GetRole
-        if (callCount === 10) return Promise.resolve({});  // CreateEnv
-        if (callCount === 11) return Promise.resolve({ Environments: [{ CNAME: 'new-env.elasticbeanstalk.com', EnvironmentId: 'e-new', Status: 'Ready', Health: 'Green' }] });
+        if (callCount === 8) return Promise.resolve({});  // CreateEnv
+        if (callCount === 9) return Promise.resolve({ Environments: [{ CNAME: 'new-env.elasticbeanstalk.com', EnvironmentId: 'e-new', Status: 'Ready', Health: 'Green' }] });
 
         return Promise.resolve({});
       });
