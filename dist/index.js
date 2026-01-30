@@ -95656,14 +95656,15 @@ async function run() {
             deploymentActionType = 'create';
             core.endGroup();
         }
+        let lastSeenEventDate;
         if (waitForDeployment) {
             core.startGroup('⏳ Waiting for deployment');
-            await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
+            lastSeenEventDate = await (0, monitoring_1.waitForDeploymentCompletion)(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
             core.endGroup();
         }
         if (waitForEnvironmentRecovery) {
             core.startGroup('🏥 Waiting for environment health');
-            await (0, monitoring_1.waitForHealthRecovery)(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime);
+            await (0, monitoring_1.waitForHealthRecovery)(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime, lastSeenEventDate);
             core.endGroup();
         }
         const envInfo = await (0, aws_operations_1.getEnvironmentInfo)(clients, applicationName, environmentName);
@@ -95818,6 +95819,7 @@ async function describeRecentEvents(clients, applicationName, environmentName, l
 }
 /**
  * Wait for deployment to complete
+ * Returns the last seen event date to avoid duplicate events in subsequent monitoring
  */
 async function waitForDeploymentCompletion(clients, applicationName, environmentName, timeout, deploymentActionType, deploymentStartTime) {
     core.info('⏳ Waiting for deployment to complete...');
@@ -95838,9 +95840,9 @@ async function waitForDeploymentCompletion(clients, applicationName, environment
             const status = env.Status;
             if (status === 'Ready') {
                 // Fetch and display final events before completing
-                await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
+                const finalEvents = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
                 core.info('✅ Deployment complete');
-                return;
+                return finalEvents.lastEventDate || lastSeenEventDate;
             }
             // Check for fatal/error events during deployment
             // This prevents getting stuck when errors occur during deployment
@@ -95868,13 +95870,13 @@ exports.waitForDeploymentCompletion = waitForDeploymentCompletion;
 /**
  * Wait for environment health to recover
  */
-async function waitForHealthRecovery(clients, applicationName, environmentName, timeout, deploymentStartTime) {
+async function waitForHealthRecovery(clients, applicationName, environmentName, timeout, deploymentStartTime, lastEventDateFromDeployment) {
     core.info('🏥 Waiting for environment health to recover...');
     const startTime = Date.now();
     const maxWait = timeout * 1000;
     let previousStatus;
     let previousHealth;
-    let lastSeenEventDate;
+    let lastSeenEventDate = lastEventDateFromDeployment;
     while (Date.now() - startTime < maxWait) {
         const command = new client_elastic_beanstalk_1.DescribeEnvironmentsCommand({
             ApplicationName: applicationName,

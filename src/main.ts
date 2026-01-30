@@ -154,14 +154,15 @@ export async function run(): Promise<void> {
       core.endGroup();
     }
 
+    let lastSeenEventDate: Date | undefined;
     if (waitForDeployment) {
       core.startGroup('⏳ Waiting for deployment');
-      await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
+      lastSeenEventDate = await waitForDeploymentCompletion(clients, applicationName, environmentName, deploymentTimeout, deploymentActionType, deploymentStartTime);
       core.endGroup();
     }
     if (waitForEnvironmentRecovery) {
       core.startGroup('🏥 Waiting for environment health');
-      await waitForHealthRecovery(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime);
+      await waitForHealthRecovery(clients, applicationName, environmentName, deploymentTimeout, deploymentStartTime, lastSeenEventDate);
       core.endGroup();
     }
 

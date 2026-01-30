@@ -110,6 +110,7 @@ async function describeRecentEvents(
 
 /**
  * Wait for deployment to complete
+ * Returns the last seen event date to avoid duplicate events in subsequent monitoring
  */
 export async function waitForDeploymentCompletion(
   clients: AWSClients,
@@ -118,7 +119,7 @@ export async function waitForDeploymentCompletion(
   timeout: number,
   deploymentActionType?: 'create' | 'update',
   deploymentStartTime?: Date
-): Promise<void> {
+): Promise<Date | undefined> {
   core.info('⏳ Waiting for deployment to complete...');
 
   const startTime = Date.now();
@@ -143,7 +144,7 @@ export async function waitForDeploymentCompletion(
 
       if (status === 'Ready') {
         // Fetch and display final events before completing
-        await describeRecentEvents(
+        const finalEvents = await describeRecentEvents(
           clients,
           applicationName,
           environmentName,
@@ -151,7 +152,7 @@ export async function waitForDeploymentCompletion(
           deploymentStartTime
         );
         core.info('✅ Deployment complete');
-        return;
+        return finalEvents.lastEventDate || lastSeenEventDate;
       }
 
       // Check for fatal/error events during deployment
@@ -198,7 +199,8 @@ export async function waitForHealthRecovery(
   applicationName: string,
   environmentName: string,
   timeout: number,
-  deploymentStartTime?: Date
+  deploymentStartTime?: Date,
+  lastEventDateFromDeployment?: Date
 ): Promise<void> {
   core.info('🏥 Waiting for environment health to recover...');
 
@@ -206,7 +208,7 @@ export async function waitForHealthRecovery(
   const maxWait = timeout * 1000;
   let previousStatus: string | undefined;
   let previousHealth: string | undefined;
-  let lastSeenEventDate: Date | undefined;
+  let lastSeenEventDate: Date | undefined = lastEventDateFromDeployment;
 
   while (Date.now() - startTime < maxWait) {
     const command = new DescribeEnvironmentsCommand({

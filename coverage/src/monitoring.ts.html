@@ -23,16 +23,16 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">47.61% </span>
+                <span class="strong">48.11% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>50/105</span>
+                <span class='fraction'>51/106</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">28.33% </span>
+                <span class="strong">30.64% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>17/60</span>
+                <span class='fraction'>19/62</span>
             </div>
         
             
@@ -44,9 +44,9 @@
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">48.03% </span>
+                <span class="strong">48.54% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>49/102</span>
+                <span class='fraction'>50/103</span>
             </div>
         
             
@@ -358,7 +358,9 @@
 <a name='L293'></a><a href='#L293'>293</a>
 <a name='L294'></a><a href='#L294'>294</a>
 <a name='L295'></a><a href='#L295'>295</a>
-<a name='L296'></a><a href='#L296'>296</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
+<a name='L296'></a><a href='#L296'>296</a>
+<a name='L297'></a><a href='#L297'>297</a>
+<a name='L298'></a><a href='#L298'>298</a></td><td class="line-coverage quiet"><span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -471,6 +473,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -554,6 +557,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -566,7 +570,7 @@
 <span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-yes">4x</span>
@@ -765,6 +769,7 @@ async function describeRecentEvents(
 &nbsp;
 /**
  * Wait for deployment to complete
+ * Returns the last seen event date to avoid duplicate events in subsequent monitoring
  */
 export async function waitForDeploymentCompletion(
   clients: AWSClients,
@@ -773,7 +778,7 @@ export async function waitForDeploymentCompletion(
   timeout: number,
   deploymentActionType?: 'create' | 'update',
   deploymentStartTime?: Date
-): Promise&lt;void&gt; {
+): Promise&lt;Date | undefined&gt; {
   core.info('⏳ Waiting for deployment to complete...');
 &nbsp;
   const startTime = Date.now();
@@ -798,7 +803,7 @@ export async function waitForDeploymentCompletion(
 &nbsp;
       if (status === 'Ready') {
         // Fetch and display final events before completing
-        await describeRecentEvents(
+        const finalEvents = await describeRecentEvents(
           clients,
           applicationName,
           environmentName,
@@ -806,7 +811,7 @@ export async function waitForDeploymentCompletion(
           deploymentStartTime
         );
         core.info('✅ Deployment complete');
-        return;
+        return finalEvents.lastEventDate || lastSeenEventDate;
       }
 &nbsp;
       // Check for fatal/error events during deployment
@@ -853,7 +858,8 @@ export async function waitForHealthRecovery(
   applicationName: string,
   environmentName: string,
   timeout: number,
-  deploymentStartTime?: Date
+  deploymentStartTime?: Date,
+  lastEventDateFromDeployment?: Date
 ): Promise&lt;void&gt; {
   core.info('🏥 Waiting for environment health to recover...');
 &nbsp;
@@ -861,7 +867,7 @@ export async function waitForHealthRecovery(
   const maxWait = timeout * 1000;
   let previousStatus: string | undefined;
   let previousHealth: string | undefined;
-  let lastSeenEventDate: Date | undefined;
+  let lastSeenEventDate: Date | undefined = lastEventDateFromDeployment;
 &nbsp;
   while (Date.now() - startTime &lt; maxWait) {
     const command = new DescribeEnvironmentsCommand({
@@ -955,7 +961,7 @@ export async function waitForHealthRecovery(
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-30T17:11:04.475Z
+                at 2026-01-30T18:28:14.461Z
             </div>
         <script src="../prettify.js"></script>
         <script>

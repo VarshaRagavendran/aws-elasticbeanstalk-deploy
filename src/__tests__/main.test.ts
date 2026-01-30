@@ -183,6 +183,7 @@ describe('Main Functions', () => {
       const mockArchiveInstance = archiver();
       expect(mockArchiveInstance.pipe).toHaveBeenCalled();
       expect(mockArchiveInstance.glob).toHaveBeenCalledWith('**/*', { 
+        dot: true,
         ignore: ['*.git*', '*.node*'] 
       });
       expect(mockArchiveInstance.finalize).toHaveBeenCalled();
