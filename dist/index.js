@@ -95638,6 +95638,11 @@ async function run() {
                 throw new Error(`Environment ${environmentName} does not exist and create-environment-if-not-exists is false`);
             }
             core.startGroup('🆕 Creating new environment');
+            // IAM roles are required for creating environments
+            if (!parsedIamInstanceProfile || !parsedServiceRole) {
+                throw new Error('IAM roles are required when creating a new environment. ' +
+                    'Please include IamInstanceProfile and ServiceRole in option-settings.');
+            }
             await (0, aws_operations_1.createEnvironment)(clients, applicationName, environmentName, applicationVersionLabel, optionSettings, solutionStackName, platformArn, parsedIamInstanceProfile, parsedServiceRole, maxRetries, retryDelay);
             deploymentActionType = 'create';
             core.endGroup();
@@ -95887,10 +95892,21 @@ async function waitForHealthRecovery(clients, applicationName, environmentName, 
                 core.info('✅ Environment is healthy!');
                 return;
             }
-            if (health === 'Red' && status === 'Ready') {
-                // Fetch recent events to help diagnose the issue
-                await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
-                throw new Error('Environment deployment failed - health is Red');
+            // Check for errors if health is Red (regardless of status)
+            // This catches errors even when status is still Updating
+            if (health === 'Red') {
+                const eventCheck = await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
+                // Update last seen event date
+                if (eventCheck.lastEventDate) {
+                    lastSeenEventDate = eventCheck.lastEventDate;
+                }
+                if (eventCheck.hasError) {
+                    throw new Error(`Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`);
+                }
+                // If status is Ready and health is Red, deployment failed
+                if (status === 'Ready') {
+                    throw new Error('Environment deployment failed - health is Red');
+                }
             }
             // Only log when status or health changes
             if (status !== previousStatus || health !== previousHealth) {
@@ -95942,7 +95958,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.parseJsonInput = exports.validateAllInputs = void 0;
 const core = __importStar(__nccwpck_require__(37484));
-function parseIamRolesFromOptionSettings(optionSettingsJson) {
+function parseIamRolesFromOptionSettings(optionSettingsJson, requireIamRoles = false) {
     let parsedSettings;
     try {
         parsedSettings = JSON.parse(optionSettingsJson);
@@ -95970,11 +95986,14 @@ function parseIamRolesFromOptionSettings(optionSettingsJson) {
             serviceRole = setting.Value;
         }
     }
-    if (!iamInstanceProfile) {
-        throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
-    }
-    if (!serviceRole) {
-        throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
+    // Only require IAM roles if explicitly requested (e.g., for create operations)
+    if (requireIamRoles) {
+        if (!iamInstanceProfile) {
+            throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
+        }
+        if (!serviceRole) {
+            throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
+        }
     }
     return { iamInstanceProfile, serviceRole };
 }
@@ -96033,10 +96052,11 @@ function validateRequiredInputs() {
         core.setFailed(`Environment name can only contain alphanumeric characters and hyphens, got: ${environmentName}`);
         return { valid: false };
     }
-    // Validate IAMInstanceProfile role and ServiceRole
+    // Parse IAM roles from option settings (optional for updates, required for creates)
+    // We'll validate requirement later based on createEnvironmentIfNotExists flag
     let parsedIamRoles;
     try {
-        parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings);
+        parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings, false);
     }
     catch (error) {
         core.setFailed(error.message);
@@ -96050,8 +96070,8 @@ function validateRequiredInputs() {
         solutionStackName,
         platformArn,
         optionSettings,
-        parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile,
-        parsedServiceRole: parsedIamRoles.serviceRole
+        parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile || undefined,
+        parsedServiceRole: parsedIamRoles.serviceRole || undefined
     };
 }
 function validateNumericInputs() {
@@ -96179,6 +96199,22 @@ function validateAllInputs() {
     const additionalInputs = getAdditionalInputs();
     if (!additionalInputs.valid) {
         return { valid: false };
+    }
+    // Validate IAM roles are required only if creating environment
+    if (additionalInputs.createEnvironmentIfNotExists) {
+        if (!requiredInputs.parsedIamInstanceProfile || !requiredInputs.parsedServiceRole) {
+            if (!requiredInputs.optionSettings) {
+                core.setFailed('option-settings is required when creating a new environment');
+                return { valid: false };
+            }
+            try {
+                parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
+            }
+            catch (error) {
+                core.setFailed(error.message);
+                return { valid: false };
+            }
+        }
     }
     const validatedInputs = {
         valid: true,

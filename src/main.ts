@@ -134,6 +134,15 @@ export async function run(): Promise<void> {
       }
 
       core.startGroup('🆕 Creating new environment');
+      
+      // IAM roles are required for creating environments
+      if (!parsedIamInstanceProfile || !parsedServiceRole) {
+        throw new Error(
+          'IAM roles are required when creating a new environment. ' +
+          'Please include IamInstanceProfile and ServiceRole in option-settings.'
+        );
+      }
+      
       await createEnvironment(
         clients,
         applicationName,

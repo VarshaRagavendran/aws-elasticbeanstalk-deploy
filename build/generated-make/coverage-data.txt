@@ -12,3 +12,5 @@ typescript:line:82.0754716981132
 typescript:branch:70.29702970297029
 typescript:line:82.10922787193974
 typescript:branch:70.29702970297029
+typescript:line:81.49532710280374
+typescript:branch:68.93203883495146

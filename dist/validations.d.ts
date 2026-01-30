@@ -18,8 +18,8 @@ export interface Inputs {
     s3BucketName?: string;
     excludePatterns: string;
     optionSettings: string;
-    parsedIamInstanceProfile: string;
-    parsedServiceRole: string;
+    parsedIamInstanceProfile?: string;
+    parsedServiceRole?: string;
 }
 export interface ParsedIamRoles {
     iamInstanceProfile: string;

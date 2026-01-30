@@ -20,8 +20,8 @@ export interface Inputs {
   s3BucketName?: string;
   excludePatterns: string;
   optionSettings: string;
-  parsedIamInstanceProfile: string;
-  parsedServiceRole: string;
+  parsedIamInstanceProfile?: string;
+  parsedServiceRole?: string;
 }
 
 export interface ParsedIamRoles {
@@ -29,7 +29,7 @@ export interface ParsedIamRoles {
   serviceRole: string;
 }
 
-function parseIamRolesFromOptionSettings(optionSettingsJson: string): ParsedIamRoles {
+function parseIamRolesFromOptionSettings(optionSettingsJson: string, requireIamRoles: boolean = false): ParsedIamRoles {
   let parsedSettings: any[];
   try {
     parsedSettings = JSON.parse(optionSettingsJson);
@@ -62,12 +62,15 @@ function parseIamRolesFromOptionSettings(optionSettingsJson: string): ParsedIamR
     }
   }
 
-  if (!iamInstanceProfile) {
-    throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
-  }
+  // Only require IAM roles if explicitly requested (e.g., for create operations)
+  if (requireIamRoles) {
+    if (!iamInstanceProfile) {
+      throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
+    }
 
-  if (!serviceRole) {
-    throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
+    if (!serviceRole) {
+      throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
+    }
   }
 
   return { iamInstanceProfile, serviceRole };
@@ -137,10 +140,11 @@ function validateRequiredInputs() {
     return { valid: false };
   }
 
-  // Validate IAMInstanceProfile role and ServiceRole
+  // Parse IAM roles from option settings (optional for updates, required for creates)
+  // We'll validate requirement later based on createEnvironmentIfNotExists flag
   let parsedIamRoles: ParsedIamRoles;
   try {
-    parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings);
+    parsedIamRoles = parseIamRolesFromOptionSettings(optionSettings, false);
   } catch (error) {
     core.setFailed((error as Error).message);
     return { valid: false };
@@ -154,8 +158,8 @@ function validateRequiredInputs() {
     solutionStackName,
     platformArn,
     optionSettings,
-    parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile,
-    parsedServiceRole: parsedIamRoles.serviceRole
+    parsedIamInstanceProfile: parsedIamRoles.iamInstanceProfile || undefined,
+    parsedServiceRole: parsedIamRoles.serviceRole || undefined
   };
 }
 
@@ -320,6 +324,22 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
   const additionalInputs = getAdditionalInputs();
   if (!additionalInputs.valid) {
     return { valid: false };
+  }
+
+  // Validate IAM roles are required only if creating environment
+  if (additionalInputs.createEnvironmentIfNotExists) {
+    if (!requiredInputs.parsedIamInstanceProfile || !requiredInputs.parsedServiceRole) {
+      if (!requiredInputs.optionSettings) {
+        core.setFailed('option-settings is required when creating a new environment');
+        return { valid: false };
+      }
+      try {
+        parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
+      } catch (error) {
+        core.setFailed((error as Error).message);
+        return { valid: false };
+      }
+    }
   }
 
   const validatedInputs = {

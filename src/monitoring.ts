@@ -2,7 +2,6 @@ import * as core from '@actions/core';
 import {
   DescribeEnvironmentsCommand,
   DescribeEventsCommand,
-  waitUntilEnvironmentUpdated,
 } from '@aws-sdk/client-elastic-beanstalk';
 import { AWSClients } from './aws-clients';
 
@@ -250,10 +249,32 @@ export async function waitForHealthRecovery(
         return;
       }
 
-      if (health === 'Red' && status === 'Ready') {
-        // Fetch recent events to help diagnose the issue
-        await describeRecentEvents(clients, applicationName, environmentName, lastSeenEventDate, deploymentStartTime);
-        throw new Error('Environment deployment failed - health is Red');
+      // Check for errors if health is Red (regardless of status)
+      // This catches errors even when status is still Updating
+      if (health === 'Red') {
+        const eventCheck = await describeRecentEvents(
+          clients,
+          applicationName,
+          environmentName,
+          lastSeenEventDate,
+          deploymentStartTime
+        );
+
+        // Update last seen event date
+        if (eventCheck.lastEventDate) {
+          lastSeenEventDate = eventCheck.lastEventDate;
+        }
+
+        if (eventCheck.hasError) {
+          throw new Error(
+            `Environment deployment failed - fatal or error event detected: ${eventCheck.errorMessage}`
+          );
+        }
+
+        // If status is Ready and health is Red, deployment failed
+        if (status === 'Ready') {
+          throw new Error('Environment deployment failed - health is Red');
+        }
       }
 
       // Only log when status or health changes
