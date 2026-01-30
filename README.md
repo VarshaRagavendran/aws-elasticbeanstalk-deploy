@@ -4,35 +4,118 @@ A GitHub Action for deploying applications to AWS Elastic Beanstalk with automat
 
 ## Table of Contents
 
-- [Usage](#usage)
-  - [Basic Deployment](#basic-deployment)
-  - [Deploy with Custom Configuration](#deploy-with-custom-configuration)
-  - [Deploy Pre-built Package](#deploy-pre-built-package)
-  - [Multi-Environment Deployment](#multi-environment-deployment)
-  - [Reuse Existing Versions](#reuse-existing-versions)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+  - [Step 1: Create IAM User](#step-1-create-iam-user)
+  - [Step 2: Create IAM Roles for Elastic Beanstalk](#step-2-create-iam-roles-for-elastic-beanstalk)
+  - [Step 3: Add GitHub Secrets](#step-3-add-github-secrets)
+- [Quick Start](#quick-start)
 - [Inputs](#inputs)
-  - [Required Inputs](#required-inputs)
-  - [Optional Inputs](#optional-inputs)
 - [Outputs](#outputs)
-- [Credentials and Region](#credentials-and-region)
-- [Permissions](#permissions)
-- [Advanced Configuration](#advanced-configuration)
-  - [Option Settings](#option-settings)
-  - [Exclude Patterns](#exclude-patterns)
-  - [Deployment Strategies](#deployment-strategies)
 - [Examples](#examples)
-- [Example Output](#example-output)
-  - [Successful Deployment (Happy Path)](#successful-deployment-happy-path)
-  - [Failed Deployment (Unhappy Path)](#failed-deployment-unhappy-path)
-- [Finding Solution Stack Names](#finding-solution-stack-names)
+- [Option Settings](#option-settings)
+- [API Usage](#api-usage)
 - [Troubleshooting](#troubleshooting)
 - [License](#license)
 
-## Usage
+## Features
 
-### Basic Deployment
+- **Automatic Environment Creation**: Creates Elastic Beanstalk applications and environments if they don't exist
+- **Deployment Package Management**: Auto-creates deployment packages from your repository or uses pre-built packages
+- **S3 Upload**: Uploads deployment artifacts to S3 for version management
+- **Health Monitoring**: Waits for deployment completion and environment health recovery
+- **Event Streaming**: Displays real-time deployment events in GitHub Actions logs
+- **Intelligent Retries**: Exponential backoff for transient API failures
+- **Version Reuse**: Optionally skip S3 upload if version already exists
 
-Deploy your application to Elastic Beanstalk with minimal configuration:
+## Prerequisites
+
+Before using this action, you need to set up AWS IAM permissions. This section walks you through the required steps.
+
+### Step 1: Create IAM User
+
+Create an IAM user that GitHub Actions will use to deploy to Elastic Beanstalk.
+
+#### Required Permissions
+
+The IAM user needs two types of permissions:
+
+**1. Elastic Beanstalk Permissions**
+
+Attach the AWS managed policy **`AdministratorAccess-AWSElasticBeanstalk`** to your IAM user. This policy grants the necessary permissions for Elastic Beanstalk to create and manage your environment, including:
+- Creating and updating applications, environments, and application versions
+- Managing EC2 instances, Auto Scaling groups, and load balancers
+- Accessing CloudWatch logs and metrics
+
+**2. S3 Bucket Permissions**
+
+This action uploads your deployment package to S3 before creating an application version. This is required because the Elastic Beanstalk `CreateApplicationVersion` API requires the source bundle to be stored in S3—you cannot pass the deployment package directly to the API.
+
+The S3 bucket name defaults to `{applicationName}-{accountId}` (e.g., `my-app-123456789012`), or you can specify a custom bucket name using the `s3-bucket-name` input.
+
+Add the following inline policy to your IAM user (replace `{bucket-name}` with your bucket name):
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "s3:GetObject",
+                "s3:GetObjectVersion",
+                "s3:CreateBucket",
+                "s3:ListBucket",
+                "s3:GetBucketLocation",
+                "s3:GetBucketAcl",
+                "s3:PutObject"
+            ],
+            "Resource": [
+                "arn:aws:s3:::{bucket-name}",
+                "arn:aws:s3:::{bucket-name}/*"
+            ]
+        }
+    ]
+}
+```
+
+### Step 2: Create IAM Roles for Elastic Beanstalk
+
+Elastic Beanstalk requires two IAM roles that must be passed in the `option-settings` input:
+
+**1. Instance Profile** (`aws-elasticbeanstalk-ec2-role`)
+
+This role is assumed by EC2 instances in your environment. It allows instances to:
+- Upload logs to S3 and CloudWatch
+- Download application versions from S3
+- Send metrics to CloudWatch
+
+See: [Managing Elastic Beanstalk Instance Profiles](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html)
+
+**2. Service Role** (`aws-elasticbeanstalk-service-role`)
+
+This role is assumed by Elastic Beanstalk itself. It allows the service to:
+- Create and manage AWS resources (EC2, ELB, Auto Scaling, etc.)
+- Monitor environment health
+- Perform managed platform updates
+
+See: [Managing Elastic Beanstalk Service Roles](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-servicerole.html)
+
+**Creating the Roles**
+
+- [Create the Instance Profile](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html#iam-instanceprofile-create)
+- [Create the Service Role](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-servicerole.html#iam-servicerole-create)
+
+### Step 3: Add GitHub Secrets
+
+Add the following secrets to your GitHub repository (Settings → Secrets and variables → Actions):
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_ACCESS_KEY_ID` | Access key ID for your IAM user |
+| `AWS_SECRET_ACCESS_KEY` | Secret access key for your IAM user |
+
+## Quick Start
 
 ```yaml
 name: Deploy to Elastic Beanstalk
@@ -40,6 +123,11 @@ name: Deploy to Elastic Beanstalk
 on:
   push:
     branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  APPLICATION_NAME: my-app
+  ENVIRONMENT_NAME: my-app-env
 
 jobs:
   deploy:
@@ -53,14 +141,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Deploy to Elastic Beanstalk
-        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
+        uses: varsharagavendran/aws-elasticbeanstalk-deploy@main
         with:
-          aws-region: us-east-1
-          application-name: my-app
-          environment-name: my-app-prod
+          aws-region: ${{ env.AWS_REGION }}
+          application-name: ${{ env.APPLICATION_NAME }}
+          environment-name: ${{ env.ENVIRONMENT_NAME }}
           solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
           option-settings: |
             [
@@ -77,149 +165,48 @@ jobs:
             ]
 ```
 
-### Deploy with Custom Configuration
-
-Configure Elastic Beanstalk option settings for your deployment:
-
-```yaml
-- name: Deploy with Custom Settings
-  uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-  with:
-    aws-region: us-east-1
-    application-name: my-app
-    environment-name: my-app-prod
-    solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
-    create-application-if-not-exists: true
-    option-settings: |
-      [
-        {
-          "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "IamInstanceProfile",
-          "Value": "aws-elasticbeanstalk-ec2-role"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:environment",
-          "OptionName": "ServiceRole",
-          "Value": "aws-elasticbeanstalk-service-role"
-        },
-        {
-          "Namespace": "aws:ec2:instances",
-          "OptionName": "InstanceTypes",
-          "Value": "t3.medium"
-        },
-        {
-          "Namespace": "aws:autoscaling:asg",
-          "OptionName": "MinSize",
-          "Value": "2"
-        },
-        {
-          "Namespace": "aws:autoscaling:asg",
-          "OptionName": "MaxSize",
-          "Value": "4"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
-          "OptionName": "StreamLogs",
-          "Value": "true"
-        }
-      ]
-```
-
-### Deploy Pre-built Package
-
-Deploy a pre-built deployment package (useful for compiled applications):
-
-```yaml
-- name: Build Java Application
-  run: mvn clean package
-
-- name: Deploy to Elastic Beanstalk
-  uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-  with:
-    aws-region: us-east-1
-    application-name: my-java-app
-    environment-name: my-java-app-prod
-    solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Corretto 21'
-    deployment-package-path: target/my-app.zip
-    option-settings: |
-      [
-        {
-          "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "IamInstanceProfile",
-          "Value": "aws-elasticbeanstalk-ec2-role"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:environment",
-          "OptionName": "ServiceRole",
-          "Value": "aws-elasticbeanstalk-service-role"
-        }
-      ]
-```
-
-### Reuse Existing Versions
-
-Skip S3 upload and version creation if the version already exists:
-
-```yaml
-- name: Deploy Existing Version
-  uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-  with:
-    aws-region: us-east-1
-    application-name: my-app
-    environment-name: my-app-prod
-    solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
-    version-label: v1.2.3
-    use-existing-application-version-if-available: true  # Default is true
-    option-settings: |
-      [
-        {
-          "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "IamInstanceProfile",
-          "Value": "aws-elasticbeanstalk-ec2-role"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:environment",
-          "OptionName": "ServiceRole",
-          "Value": "aws-elasticbeanstalk-service-role"
-        }
-      ]
-```
-
 ## Inputs
 
 ### Required Inputs
 
-| Name | Description | Example |
-|------|-------------|---------|
-| `aws-region` | AWS region where your Elastic Beanstalk application is deployed | `us-east-1` |
-| `application-name` | Name of your Elastic Beanstalk application (1-100 characters) | `my-app` |
-| `environment-name` | Name of your Elastic Beanstalk environment (4-40 characters, alphanumeric and hyphens only) | `my-app-prod` |
-| `solution-stack-name` | Platform version to use for the environment | `64bit Amazon Linux 2023 v4.3.0 running Python 3.11` |
-| `option-settings` | JSON array of Elastic Beanstalk option settings to apply during deployment or environment creation. Must include IAM Instance Profile and Service Role settings | See examples above |
+| Input | Description |
+|-------|-------------|
+| `aws-region` | AWS region for deployment (e.g., `us-east-1`, `eu-west-1`) |
+| `application-name` | Elastic Beanstalk application name (1-100 characters) |
+| `environment-name` | Elastic Beanstalk environment name (4-40 characters, alphanumeric and hyphens only) |
+
+### Platform Configuration (One Required)
+
+You must provide exactly one of the following:
+
+| Input | Description |
+|-------|-------------|
+| `solution-stack-name` | Solution stack name (e.g., `64bit Amazon Linux 2023 v4.3.0 running Python 3.11`) |
+| `platform-arn` | Platform ARN (e.g., `arn:aws:elasticbeanstalk:us-east-1::platform/Python 3.11 running on 64bit Amazon Linux 2023/4.3.0`) |
 
 ### Optional Inputs
 
-| Name | Description | Default |
-|------|-------------|---------|
-| `version-label` | Version label for the application version. Must be unique within the application (1-100 characters) | Git SHA or `v{timestamp}` |
-| `deployment-package-path` | Path to a pre-built deployment package (`.zip`, `.war`, `.jar`). If not provided, a package will be auto-created from the repository | Auto-created |
+| Input | Description | Default |
+|-------|-------------|---------|
+| `version-label` | Version label for the application version (1-100 characters) | Git SHA or `v{timestamp}` |
+| `deployment-package-path` | Path to pre-built deployment package (`.zip`, `.war`, `.jar`) | Auto-created from repository |
+| `option-settings` | JSON array of Elastic Beanstalk option settings. **Required when creating a new environment** (must include IAM Instance Profile and Service Role) | None |
 | `create-environment-if-not-exists` | Create the environment if it doesn't exist | `true` |
-| `create-application-if-not-exists` | Create the application if it doesn't exist. **Note:** If `true`, ensure `create-environment-if-not-exists` is also `true` | `true` |
-| `wait-for-deployment` | Wait for the deployment to complete before finishing the action | `true` |
-| `wait-for-environment-recovery` | Wait for environment health to become Green or Yellow. | `true` |
-| `deployment-timeout` | Maximum time to wait for deployment completion (in seconds, 60-3600) | `900` (15 minutes) |
-| `max-retries` | Maximum number of retry attempts for failed API calls (0-10) | `3` |
-| `retry-delay` | Initial delay between retries in seconds (1-60). Uses exponential backoff | `5` |
-| `use-existing-application-version-if-available` | Reuse existing application version if it exists (skips S3 upload and version creation) | `true` |
-| `create-s3-bucket-if-not-exists` | Automatically create the S3 bucket if it doesn't exist. Bucket name: `elasticbeanstalk-{region}-{account-id}` | `true` |
-| `s3-bucket-name` | Custom S3 bucket name for deployment packages. If not specified, defaults to `elasticbeanstalk-{region}-{account-id}` | Auto-generated |
-| `exclude-patterns` | Comma-separated list of glob patterns to exclude from the deployment package (only used when auto-creating packages) | None (all files included) |
-
+| `create-application-if-not-exists` | Create the application if it doesn't exist | `true` |
+| `wait-for-deployment` | Wait for deployment to complete | `true` |
+| `wait-for-environment-recovery` | Wait for environment health to become Green or Yellow | `true` |
+| `deployment-timeout` | Maximum wait time for deployment (seconds, 60-3600) | `900` |
+| `max-retries` | Maximum retry attempts for failed API calls (0-10) | `2` |
+| `retry-delay` | Initial delay between retries in seconds (1-60, uses exponential backoff) | `5` |
+| `use-existing-application-version-if-available` | Reuse existing application version if it exists (skips S3 upload) | `true` |
+| `create-s3-bucket-if-not-exists` | Create S3 bucket if it doesn't exist | `true` |
+| `s3-bucket-name` | Custom S3 bucket name for deployment packages | `{applicationName}-{accountId}` |
+| `exclude-patterns` | Comma-separated glob patterns to exclude from auto-created packages | None |
 
 ## Outputs
 
-| Name | Description |
-|------|-------------|
+| Output | Description |
+|--------|-------------|
 | `environment-url` | The CNAME/URL of the deployed environment |
 | `environment-id` | The environment ID (e.g., `e-abc123def4`) |
 | `environment-status` | Current status of the environment |
@@ -227,72 +214,21 @@ Skip S3 upload and version creation if the version already exists:
 | `deployment-action-type` | Whether the environment was `create`d or `update`d |
 | `version-label` | The version label that was deployed |
 
-## Credentials and Region
+## Examples
 
-Configure AWS credentials using the [`aws-actions/configure-aws-credentials`](https://github.com/aws-actions/configure-aws-credentials) action:
+Complete workflow examples are available in the [`examples/`](examples/) directory:
 
-```yaml
-- name: Configure AWS Credentials
-  uses: aws-actions/configure-aws-credentials@v4
-  with:
-    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-    aws-region: us-east-1
-```
+| Platform | Example |
+|----------|---------|
+| Python | [python.yml](examples/python.yml) |
+| Node.js | [nodejs.yml](examples/nodejs.yml) |
+| Java (Corretto) | [corretto.yml](examples/corretto.yml) |
+| Go | [go.yml](examples/go.yml) |
+| Docker | [docker.yml](examples/docker.yml) |
 
-## Permissions
+## Option Settings
 
-### IAM Roles Required
-
-Two IAM roles must exist in your AWS account and passed in as part of the option-settings Input Parameter:
-
-1. **Instance Profile** (default: `aws-elasticbeanstalk-ec2-role`)
-   - Allows EC2 instances to interact with AWS services (S3, CloudWatch, etc.)
-   - https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html
-
-2. **Service Role** (default: `aws-elasticbeanstalk-service-role`)
-   - Allows Elastic Beanstalk to manage AWS resources on your behalf
-   - https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-servicerole.html
-
-You can create these roles using the [AWS Console setup wizard](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html#iam-instanceprofile-create).
-
-### IAM User Permissions
-
-The IAM user used for deployment must have the **AdministratorAccess-AWSElasticBeanstalk** AWS managed policy attached. This policy grants the necessary permissions for Elastic Beanstalk to create and manage your environment.
-
-Additionally, the IAM user must have S3 permissions for the deployment bucket. The bucket name is either:
-
-- **Custom bucket**: The value you pass to `s3-bucket-name`
-- **Default bucket**: `{applicationName}-{accountId}` (e.g., `my-app-123456789012`)
-
-Add the following S3 policy to your IAM user:
-
-```json
-{
-    "Effect": "Allow",
-    "Action": [
-        "s3:GetObject",
-        "s3:GetObjectVersion",
-        "s3:CreateBucket",
-        "s3:ListBucket",
-        "s3:GetBucketLocation",
-        "s3:GetBucketAcl",
-        "s3:PutObject"
-    ],
-    "Resource": [
-        "arn:aws:s3:::{bucket-name}",
-        "arn:aws:s3:::{bucket-name}/*"
-    ]
-}
-```
-
-Replace `{bucket-name}` with your custom bucket name or `{applicationName}-{accountId}` for the default.
-
-## Advanced Configuration
-
-### Option Settings
-
-Elastic Beanstalk option settings allow you to configure environment properties, instance settings, monitoring, and more. Provide them as a JSON array. **The IAM Instance Profile and Service Role settings are required:**
+The `option-settings` input accepts a JSON array of Elastic Beanstalk configuration options. When creating a new environment, you **must** include the IAM Instance Profile and Service Role:
 
 ```yaml
 option-settings: |
@@ -306,433 +242,117 @@ option-settings: |
       "Namespace": "aws:elasticbeanstalk:environment",
       "OptionName": "ServiceRole",
       "Value": "aws-elasticbeanstalk-service-role"
-    },
-    {
-      "Namespace": "aws:ec2:instances",
-      "OptionName": "InstanceTypes",
-      "Value": "t3.medium"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:environment",
-      "OptionName": "EnvironmentType",
-      "Value": "LoadBalanced"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:application:environment",
-      "OptionName": "NODE_ENV",
-      "Value": "production"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
-      "OptionName": "StreamLogs",
-      "Value": "true"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:cloudwatch:logs",
-      "OptionName": "RetentionInDays",
-      "Value": "7"
     }
   ]
 ```
 
 See the [complete list of configuration options](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options-general.html) in AWS documentation.
 
-### Exclude Patterns
+## API Usage
 
-When auto-creating deployment packages, exclude unnecessary files to reduce package size:
+This action makes AWS API calls during deployment. Understanding the API usage helps you estimate costs and troubleshoot rate limiting issues.
 
-```yaml
-exclude-patterns: '*.git*,*node_modules*,*.env*,*__pycache__*,*.pytest_cache*,*test*,*.log'
-```
+### API Calls Per Deployment
 
-Patterns use glob syntax:
-- `*.git*` - Excludes `.git` directory and `.gitignore`
-- `*node_modules*` - Excludes `node_modules` directory
-- `*.env*` - Excludes `.env` files
+| API | Calls | When |
+|-----|-------|------|
+| **STS** | | |
+| `GetCallerIdentity` | 1 | Always (verify credentials) |
+| **S3** | | |
+| `HeadBucket` | 1 | Check if bucket exists |
+| `CreateBucket` | 0-1 | Only if bucket doesn't exist and `create-s3-bucket-if-not-exists: true` |
+| `GetBucketAcl` | 1 | Verify bucket access |
+| `PutObject` | 0-1 | Upload deployment package (skipped if version exists and `use-existing-application-version-if-available: true`) |
+| **Elastic Beanstalk** | | |
+| `DescribeApplicationVersions` | 1-2 | Check if version exists, get S3 location |
+| `CreateApplicationVersion` | 0-1 | Only if version doesn't exist |
+| `DescribeEnvironments` | 1 + N | Initial check + polling during deployment |
+| `CreateEnvironment` | 0-1 | Only if environment doesn't exist |
+| `UpdateEnvironment` | 0-1 | Only if environment exists |
+| `DescribeEvents` | N | Polling during deployment (every 10-20 seconds) |
 
-**Note:** `exclude-patterns` is only used when `deployment-package-path` is NOT specified. If you provide a pre-built package path, exclusions are ignored.
+### Polling Behavior
 
-### Deployment Strategies
+- **Environment creation**: Polls every 20 seconds
+- **Environment update**: Polls every 10 seconds
+- **Health recovery**: Polls every 15 seconds
+- **Events**: Fetched with each environment status poll
 
-#### Fast Deployments with Version Reuse
+### Estimated Total API Calls
 
-For deployments where the code hasn't changed (configuration updates only):
+| Scenario | Estimated Calls |
+|----------|-----------------|
+| Update existing environment (5 min deployment) | ~40-50 calls |
+| Create new environment (10 min deployment) | ~60-80 calls |
+| Reuse existing version (skip S3 upload) | ~35-45 calls |
 
-```yaml
-- name: Update Configuration Only
-  uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-  with:
-    aws-region: us-east-1
-    application-name: my-app
-    environment-name: my-app-prod
-    solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
-    version-label: v1.0.0  # Existing version
-    use-existing-application-version-if-available: true
-    option-settings: |
-      [
-        {
-          "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "IamInstanceProfile",
-          "Value": "aws-elasticbeanstalk-ec2-role"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:environment",
-          "OptionName": "ServiceRole",
-          "Value": "aws-elasticbeanstalk-service-role"
-        },
-        {
-          "Namespace": "aws:autoscaling:asg",
-          "OptionName": "MinSize",
-          "Value": "3"
-        }
-      ]
-```
+### Cost Considerations
 
-#### Rolling Deployments
-
-Control deployment behavior through option settings:
-
-```yaml
-option-settings: |
-  [
-    {
-      "Namespace": "aws:autoscaling:launchconfiguration",
-      "OptionName": "IamInstanceProfile",
-      "Value": "aws-elasticbeanstalk-ec2-role"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:environment",
-      "OptionName": "ServiceRole",
-      "Value": "aws-elasticbeanstalk-service-role"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:command",
-      "OptionName": "DeploymentPolicy",
-      "Value": "Rolling"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:command",
-      "OptionName": "BatchSizeType",
-      "Value": "Percentage"
-    },
-    {
-      "Namespace": "aws:elasticbeanstalk:command",
-      "OptionName": "BatchSize",
-      "Value": "50"
-    }
-  ]
-```
-
-#### Disable Health Recovery Wait
-
-For faster deployments in non-production environments:
-
-```yaml
-- name: Deploy to Dev (No Health Wait)
-  uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-  with:
-    aws-region: us-east-1
-    application-name: my-app
-    environment-name: my-app-dev
-    solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
-    wait-for-environment-recovery: false  # Deploy completes faster
-    option-settings: |
-      [
-        {
-          "Namespace": "aws:autoscaling:launchconfiguration",
-          "OptionName": "IamInstanceProfile",
-          "Value": "aws-elasticbeanstalk-ec2-role"
-        },
-        {
-          "Namespace": "aws:elasticbeanstalk:environment",
-          "OptionName": "ServiceRole",
-          "Value": "aws-elasticbeanstalk-service-role"
-        }
-      ]
-```
-
-## Examples
-
-Workflow examples are available in the [`examples/`](examples/) directory:
-
-- [**python.yml**](examples/python.yml) - Python/Flask application deployment
-- [**nodejs.yml**](examples/nodejs.yml) - Node.js/Express application deployment
-- [**java.yml**](examples/java.yml) - Java/Spring Boot application deployment
-- [**docker.yml**](examples/docker.yml) - Docker-based application deployment
-
-## Example Output
-
-Below are examples of what you'll see in your GitHub Actions logs during deployment.
-
-### Successful Deployment (Happy Path)
-
-When a deployment succeeds with the environment reaching a healthy state:
-
-```
-Run aws-actions/aws-elasticbeanstalk-deploy@v1
-🔍 Validating inputs...
-✅ All inputs are valid
-
-🔐 Verifying AWS credentials...
-✅ Successfully authenticated as account 123456789012
-
-🏥 Checking IAM roles...
-✅ Instance profile 'aws-elasticbeanstalk-ec2-role' exists
-✅ Service role 'aws-elasticbeanstalk-service-role' exists
-
-📦 Creating deployment package...
-  Packaging files from: /home/runner/work/my-app/my-app
-  Excluding patterns: *.git*,*node_modules*,*.env*,*test*
-  Package size: 2.4 MB
-✅ Package created: /tmp/deploy-1234567890.zip
-
-📤 Uploading to S3...
-  Bucket: elasticbeanstalk-us-east-1-123456789012
-  Key: my-app/v1.2.3.zip
-✅ Upload complete
-
-🎯 Creating application version...
-  Application: my-app
-  Version: v1.2.3
-✅ Application version created
-
-🚀 Updating environment...
-  Environment: my-app-prod
-  Version: v1.2.3
-✅ Environment update initiated
-
-⏳ Waiting for deployment to complete...
-✅ Deployment complete
-
-🏥 Waiting for environment health to recover...
-  Current status: Updating, health: Grey
-  Current status: Ready, health: Yellow
-  Current status: Ready, health: Green
-✅ Environment is healthy!
-
-✅ Deployment successful!
-  Environment URL: my-app-prod.us-east-1.elasticbeanstalk.com
-  Environment ID: e-abc123def4
-  Version: v1.2.3
-  Action: update
-```
-
-### Failed Deployment (Unhappy Path)
-
-When a deployment completes but the environment health remains Red, the action displays recent events to help diagnose the issue:
-
-```
-Run aws-actions/aws-elasticbeanstalk-deploy@v1
-🔍 Validating inputs...
-✅ All inputs are valid
-
-🔐 Verifying AWS credentials...
-✅ Successfully authenticated as account 123456789012
-
-🏥 Checking IAM roles...
-✅ Instance profile 'aws-elasticbeanstalk-ec2-role' exists
-✅ Service role 'aws-elasticbeanstalk-service-role' exists
-
-📦 Creating deployment package...
-  Packaging files from: /home/runner/work/my-app/my-app
-  Excluding patterns: *.git*,*node_modules*,*.env*,*test*
-  Package size: 2.4 MB
-✅ Package created: /tmp/deploy-1234567890.zip
-
-📤 Uploading to S3...
-  Bucket: elasticbeanstalk-us-east-1-123456789012
-  Key: my-app/v1.2.3.zip
-✅ Upload complete
-
-🎯 Creating application version...
-  Application: my-app
-  Version: v1.2.3
-✅ Application version created
-
-🚀 Updating environment...
-  Environment: my-app-prod
-  Version: v1.2.3
-✅ Environment update initiated
-
-⏳ Waiting for deployment to complete...
-✅ Deployment complete
-
-🏥 Waiting for environment health to recover...
-  Current status: Updating, health: Grey
-  Current status: Ready, health: Yellow
-  Current status: Ready, health: Red
-
-🔍 Fetching recent events for debugging...
-📋 Recent events:
-  [2025-12-18T10:32:45.000Z] ERROR: Environment health has transitioned from Yellow to Red
-  [2025-12-18T10:32:30.000Z] ERROR: Instance i-0123456789abcdef0 failed health checks. Application is not responding on port 5000
-  [2025-12-18T10:32:15.000Z] WARN: Instance i-0123456789abcdef0 is not responding to health check requests
-  [2025-12-18T10:31:45.000Z] INFO: Successfully launched instance i-0123456789abcdef0
-  [2025-12-18T10:31:30.000Z] INFO: Environment update is starting
-  [2025-12-18T10:31:15.000Z] INFO: Application version v1.2.3 was deployed to environment my-app-prod
-
-Error: Environment deployment failed - health is Red
-```
-
-The event debugging feature automatically displays the last 10 environment events when a deployment fails, helping you quickly identify the cause. This diagnostic information eliminates the need to manually check the AWS Console for deployment failure causes.
-
-## Finding Solution Stack Names
-
-Solution stacks define the platform version (operating system, runtime, application server) for your environment.
-
-### List All Available Stacks
-
-```bash
-aws elasticbeanstalk list-available-solution-stacks --region us-east-1
-```
-
-### Find Platform-Specific Stacks
-
-**Python:**
-```bash
-aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i python
-```
-
-**Node.js:**
-```bash
-aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i node
-```
-
-**Java (Corretto):**
-```bash
-aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i corretto
-```
-
-**Note:** Solution stack names change as AWS releases new platform versions. Always verify the latest available version for your region.
+- AWS Elastic Beanstalk API calls are free
+- S3 requests have minimal costs (fractions of a cent per deployment)
+- The primary costs come from the AWS resources created (EC2, ELB, etc.)
 
 ## Troubleshooting
 
-### Deployment Timeout
+### Finding Solution Stack Names
 
-If deployments consistently timeout, increase the `deployment-timeout`:
+List available solution stacks for your region:
+
+```bash
+aws elasticbeanstalk list-available-solution-stacks --region us-east-1
+
+# Filter by platform
+aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i python
+aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i node
+aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i corretto
+aws elasticbeanstalk list-available-solution-stacks --region us-east-1 | grep -i docker
+```
+
+### Common Errors
+
+**"option-settings must include IamInstanceProfile"**
+
+When creating a new environment, you must provide IAM roles in `option-settings`. See [Option Settings](#option-settings).
+
+**"Environment name must be 4-40 characters"**
+
+Environment names must be 4-40 characters, contain only alphanumeric characters and hyphens, and cannot start or end with a hyphen.
+
+**S3 Access Denied**
+
+Ensure your IAM user has S3 permissions for the deployment bucket. See [Step 1: Create IAM User](#step-1-create-iam-user).
+
+**Deployment Timeout**
+
+Increase the timeout for slow deployments:
 
 ```yaml
 deployment-timeout: 1800  # 30 minutes
 ```
 
-Or check environment events in the AWS Console to identify issues causing slow deployments.
+**Red Health Status**
 
-### Environment Name Validation Errors
+If the environment health is Red after deployment:
+1. Check CloudWatch Logs for application errors
+2. Verify your application listens on the correct port (5000 for most platforms)
+3. Ensure health check endpoint responds correctly
 
-Environment names must:
-- Be 4-40 characters long
-- Contain only alphanumeric characters and hyphens
-- Not start or end with a hyphen
+### Skipping Health Wait
 
-```yaml
-environment-name: my-app-prod  # Valid
-environment-name: my_app       # Invalid (underscores not allowed)
-environment-name: env          # Invalid (too short, minimum 4 characters)
-```
-
-### IAM Role Not Found Errors
-
-Ensure the IAM roles exist before deployment:
-
-```bash
-# Verify instance profile
-aws iam get-instance-profile --instance-profile-name aws-elasticbeanstalk-ec2-role
-
-# Verify service role
-aws iam get-role --role-name aws-elasticbeanstalk-service-role
-```
-
-Create them using the [AWS Console](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html#iam-instanceprofile-create) or CLI.
-
-### Red Health Status After Deployment
-
-The action fails if environment health is Red after deployment completes. Common causes:
-
-1. **Application errors** - Check CloudWatch Logs or `/var/log/` on instances
-2. **Port mismatch** - Ensure your application listens on the correct port (usually 5000 or 8080)
-3. **Health check failures** - Verify your application responds to health check requests
-
-Set `wait-for-environment-recovery: false` to skip health checks if investigating deployment issues.
-
-### S3 Bucket Permissions
-
-The action uploads deployment packages to `elasticbeanstalk-{region}-{account-id}`. If you encounter S3 permission errors:
-
-1. Verify the IAM policy includes S3 permissions (see [Permissions](#permissions))
-2. Check if the bucket exists and is accessible
-3. Set `create-s3-bucket-if-not-exists: true` to auto-create the bucket
-
-### Input Conflict Warnings
-
-The action detects common misconfigurations:
-
-- **`deployment-package-path` with `exclude-patterns`**: Exclusions are ignored when using pre-built packages
-- **`create-application-if-not-exists: true` but `create-environment-if-not-exists: false`**: Application will be created but environment won't be
-- **`wait-for-environment-recovery: true` but `wait-for-deployment: false`**: Health waiting is skipped because deployment waiting is disabled
-- **`max-retries: 0`**: API calls won't retry on failure, increasing risk of transient errors causing deployment failure
-
-These are warnings, not errors, but indicate potential misconfigurations.
-
-### Preventing Unnecessary Deployments
-
-To avoid deploying when only non-application files change (e.g., documentation, tests), configure your workflow to trigger only on specific file changes:
+For faster deployments in non-production environments:
 
 ```yaml
-name: Deploy to Elastic Beanstalk
-
-on:
-  push:
-    branches: [main]
-    paths:
-      - 'src/**'           # Application source code
-      - 'requirements.txt' # Python dependencies
-      - 'package.json'     # Node.js dependencies
-      - 'pom.xml'          # Java dependencies
-      - 'Procfile'         # EB process configuration
-      - '.ebextensions/**' # EB configuration files
-      # Exclude documentation, tests, CI files
-      - '!**.md'
-      - '!.github/**'
-      - '!tests/**'
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Deploy to Elastic Beanstalk
-        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
-        with:
-          aws-region: us-east-1
-          application-name: my-app
-          environment-name: my-app-prod
-          solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
-          option-settings: |
-            [
-              {
-                "Namespace": "aws:autoscaling:launchconfiguration",
-                "OptionName": "IamInstanceProfile",
-                "Value": "aws-elasticbeanstalk-ec2-role"
-              },
-              {
-                "Namespace": "aws:elasticbeanstalk:environment",
-                "OptionName": "ServiceRole",
-                "Value": "aws-elasticbeanstalk-service-role"
-              }
-            ]
+wait-for-environment-recovery: false
 ```
-
-This prevents deployments when only README.md, test files, or CI configuration changes, reducing unnecessary deployments and costs.
 
 ## License
 
-This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+This project is licensed under the MIT-0 License.
 
 ---
 
-**Related AWS Actions:**
-- [configure-aws-credentials](https://github.com/aws-actions/configure-aws-credentials) - Configure AWS credentials and region
-
-**AWS Documentation:**
-- [Elastic Beanstalk Developer Guide](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/)
-- [Configuration Options](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options-general.html)
+**Related Resources:**
+- [AWS Elastic Beanstalk Developer Guide](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/)
+- [Configuration Options Reference](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/command-options-general.html)
 - [Platform Versions](https://docs.aws.amazon.com/elasticbeanstalk/latest/platforms/)
+- [configure-aws-credentials Action](https://github.com/aws-actions/configure-aws-credentials)
