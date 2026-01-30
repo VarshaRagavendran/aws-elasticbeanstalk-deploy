@@ -95753,10 +95753,16 @@ async function describeRecentEvents(clients, applicationName, environmentName, l
                 if (!lastSeenEventDate) {
                     core.info('📋 Recent events:');
                 }
+                // Sort events by timestamp in ascending order (oldest first)
+                const sortedEvents = [...newEvents].sort((a, b) => {
+                    const dateA = a.EventDate?.getTime() || 0;
+                    const dateB = b.EventDate?.getTime() || 0;
+                    return dateA - dateB;
+                });
                 // Track fatal/error events while displaying all events
                 const fatalOrErrorEvents = [];
                 let mostRecentDate;
-                newEvents.forEach((event) => {
+                sortedEvents.forEach((event) => {
                     const eventDate = event.EventDate;
                     if (eventDate) {
                         // Track the most recent event date
