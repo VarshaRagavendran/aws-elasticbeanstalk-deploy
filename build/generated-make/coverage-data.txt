@@ -24,3 +24,15 @@ typescript:line:81.02189781021897
 typescript:branch:68.07511737089203
 typescript:line:80.95238095238095
 typescript:branch:67.3076923076923
+typescript:line:80.25830258302584
+typescript:branch:65.70048309178745
+typescript:line:80.25830258302584
+typescript:branch:65.70048309178745
+typescript:line:79.96323529411765
+typescript:branch:65.38461538461539
+typescript:line:80.18518518518518
+typescript:branch:65.85365853658537
+typescript:line:80.52434456928839
+typescript:branch:66
+typescript:line:80.71161048689139
+typescript:branch:66.5

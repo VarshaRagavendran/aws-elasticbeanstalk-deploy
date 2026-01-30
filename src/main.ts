@@ -12,6 +12,7 @@ import {
   updateEnvironment,
   createEnvironment,
   getEnvironmentInfo,
+  validateOptionSettingsForCreate,
 } from './aws-operations';
 import { waitForDeploymentCompletion, waitForHealthRecovery } from './monitoring';
 
@@ -133,9 +134,11 @@ export async function run(): Promise<void> {
         throw new Error(`Environment ${environmentName} does not exist and create-environment-if-not-exists is false`);
       }
 
+      // Validate option-settings with IAM roles are provided when creating environment
+      validateOptionSettingsForCreate(optionSettings);
+
       core.startGroup('🆕 Creating new environment');
       
-      // optionSettings is guaranteed to be defined here (validated when createEnvironmentIfNotExists is true)
       await createEnvironment(
         clients,
         applicationName,

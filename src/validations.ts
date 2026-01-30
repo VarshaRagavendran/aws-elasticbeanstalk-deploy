@@ -22,65 +22,12 @@ export interface Inputs {
   optionSettings?: string;
 }
 
-export interface ParsedIamRoles {
-  iamInstanceProfile: string;
-  serviceRole: string;
-}
-
-function parseIamRolesFromOptionSettings(optionSettingsJson: string, requireIamRoles: boolean = false): ParsedIamRoles {
-  let parsedSettings: any[];
-  try {
-    parsedSettings = JSON.parse(optionSettingsJson);
-  } catch (error) {
-    throw new Error(`Invalid JSON in option-settings: ${(error as Error).message}`);
-  }
-
-  if (!Array.isArray(parsedSettings)) {
-    throw new Error('option-settings must be a JSON array');
-  }
-
-  let iamInstanceProfile = '';
-  let serviceRole = '';
-
-  for (const setting of parsedSettings) {
-    if (!setting.Namespace || !setting.OptionName || setting.Value === undefined) {
-      continue;
-    }
-
-    // IAM instance profile setting
-    if (setting.Namespace === 'aws:autoscaling:launchconfiguration' && 
-        setting.OptionName === 'IamInstanceProfile') {
-      iamInstanceProfile = setting.Value;
-    }
-
-    // Service role setting
-    if (setting.Namespace === 'aws:elasticbeanstalk:environment' && 
-        setting.OptionName === 'ServiceRole') {
-      serviceRole = setting.Value;
-    }
-  }
-
-  // Only require IAM roles if explicitly requested (e.g., for create operations)
-  if (requireIamRoles) {
-    if (!iamInstanceProfile) {
-      throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
-    }
-
-    if (!serviceRole) {
-      throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
-    }
-  }
-
-  return { iamInstanceProfile, serviceRole };
-}
-
 function validateRequiredInputs() {
   const awsRegion = core.getInput('aws-region', { required: true });
   const applicationName = core.getInput('application-name', { required: true });
   const environmentName = core.getInput('environment-name', { required: true });
   const solutionStackName = core.getInput('solution-stack-name') || undefined;
   const platformArn = core.getInput('platform-arn') || undefined;
-  const optionSettings = core.getInput('option-settings') || undefined;
 
   // Validate that either solution-stack-name OR platform-arn is provided, but not both
   if (!solutionStackName && !platformArn) {
@@ -138,28 +85,13 @@ function validateRequiredInputs() {
     return { valid: false };
   }
 
-  // Validate option-settings is valid JSON array if provided (IAM validation happens later if creating environment)
-  if (optionSettings) {
-    try {
-      const parsed = JSON.parse(optionSettings);
-      if (!Array.isArray(parsed)) {
-        core.setFailed('option-settings must be a JSON array');
-        return { valid: false };
-      }
-    } catch (error) {
-      core.setFailed(`Invalid JSON in option-settings: ${(error as Error).message}`);
-      return { valid: false };
-    }
-  }
-
   return {
     valid: true,
     awsRegion,
     applicationName,
     environmentName,
     solutionStackName,
-    platformArn,
-    optionSettings
+    platformArn
   };
 }
 
@@ -225,16 +157,31 @@ function validateNumericInputs() {
   };
 }
 
-function getAdditionalInputs() {
+function validateOptionalInputs() {
   const applicationVersionLabel = core.getInput('version-label') || process.env.GITHUB_SHA || `v${Date.now()}`;
   const deploymentPackagePath = core.getInput('deployment-package-path');
   const excludePatterns = core.getInput('exclude-patterns') || '';
   const s3BucketName = core.getInput('s3-bucket-name') || undefined;
+  const optionSettings = core.getInput('option-settings') || undefined;
 
   // Validate version label length
   if (applicationVersionLabel.length < 1 || applicationVersionLabel.length > 100) {
     core.setFailed(`Version label must be between 1 and 100 characters, got ${applicationVersionLabel.length}`);
     return { valid: false };
+  }
+
+  // Validate option-settings is valid JSON array if provided (IAM validation happens at runtime)
+  if (optionSettings) {
+    try {
+      const parsed = JSON.parse(optionSettings);
+      if (!Array.isArray(parsed)) {
+        core.setFailed('option-settings must be a JSON array');
+        return { valid: false };
+      }
+    } catch (error) {
+      core.setFailed(`Invalid JSON in option-settings: ${(error as Error).message}`);
+      return { valid: false };
+    }
   }
 
   const createEnvironmentIfNotExists = core.getBooleanInput('create-environment-if-not-exists');
@@ -255,7 +202,8 @@ function getAdditionalInputs() {
     useExistingApplicationVersionIfAvailable,
     createS3BucketIfNotExists,
     s3BucketName,
-    excludePatterns
+    excludePatterns,
+    optionSettings
   };
 }
 
@@ -312,23 +260,9 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
     return { valid: false };
   }
 
-  const additionalInputs = getAdditionalInputs();
-  if (!additionalInputs.valid) {
+  const optionalInputs = validateOptionalInputs();
+  if (!optionalInputs.valid) {
     return { valid: false };
-  }
-
-  // Validate option-settings with IAM roles are provided if creating environment
-  if (additionalInputs.createEnvironmentIfNotExists) {
-    if (!requiredInputs.optionSettings) {
-      core.setFailed('option-settings is required when creating a new environment. Must include IamInstanceProfile and ServiceRole.');
-      return { valid: false };
-    }
-    try {
-      parseIamRolesFromOptionSettings(requiredInputs.optionSettings, true);
-    } catch (error) {
-      core.setFailed((error as Error).message);
-      return { valid: false };
-    }
   }
 
   const validatedInputs = {
@@ -338,20 +272,20 @@ export function validateAllInputs(): { valid: boolean } & Partial<Inputs> {
     environmentName: requiredInputs.environmentName,
     solutionStackName: requiredInputs.solutionStackName,
     platformArn: requiredInputs.platformArn,
-    optionSettings: requiredInputs.optionSettings,
     deploymentTimeout: numericInputs.deploymentTimeout,
     maxRetries: numericInputs.maxRetries,
     retryDelay: numericInputs.retryDelay,
-    applicationVersionLabel: additionalInputs.applicationVersionLabel!,
-    deploymentPackagePath: additionalInputs.deploymentPackagePath,
-    createEnvironmentIfNotExists: additionalInputs.createEnvironmentIfNotExists!,
-    createApplicationIfNotExists: additionalInputs.createApplicationIfNotExists!,
-    waitForDeployment: additionalInputs.waitForDeployment!,
-    waitForEnvironmentRecovery: additionalInputs.waitForEnvironmentRecovery!,
-    useExistingApplicationVersionIfAvailable: additionalInputs.useExistingApplicationVersionIfAvailable!,
-    createS3BucketIfNotExists: additionalInputs.createS3BucketIfNotExists!,
-    s3BucketName: additionalInputs.s3BucketName,
-    excludePatterns: additionalInputs.excludePatterns!
+    applicationVersionLabel: optionalInputs.applicationVersionLabel!,
+    deploymentPackagePath: optionalInputs.deploymentPackagePath,
+    createEnvironmentIfNotExists: optionalInputs.createEnvironmentIfNotExists!,
+    createApplicationIfNotExists: optionalInputs.createApplicationIfNotExists!,
+    waitForDeployment: optionalInputs.waitForDeployment!,
+    waitForEnvironmentRecovery: optionalInputs.waitForEnvironmentRecovery!,
+    useExistingApplicationVersionIfAvailable: optionalInputs.useExistingApplicationVersionIfAvailable!,
+    createS3BucketIfNotExists: optionalInputs.createS3BucketIfNotExists!,
+    s3BucketName: optionalInputs.s3BucketName,
+    excludePatterns: optionalInputs.excludePatterns!,
+    optionSettings: optionalInputs.optionSettings
   };
 
   checkInputConflicts(validatedInputs);

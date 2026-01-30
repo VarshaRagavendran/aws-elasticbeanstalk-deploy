@@ -5,6 +5,11 @@ import { AWSClients } from './aws-clients';
  */
 export declare const MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES: number;
 /**
+ * Validate that option-settings contains required IAM roles when creating an environment.
+ * Note: JSON format validation is already done in validations.ts
+ */
+export declare function validateOptionSettingsForCreate(optionSettingsJson: string | undefined): void;
+/**
  * AWS S3 LocationConstraint regions
  * Used for S3 bucket creation outside of us-east-1
  */

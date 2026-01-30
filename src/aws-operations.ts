@@ -20,6 +20,42 @@ import { parseJsonInput } from './validations';
 export const MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = 500 * 1024 * 1024;
 
 /**
+ * Validate that option-settings contains required IAM roles when creating an environment.
+ * Note: JSON format validation is already done in validations.ts
+ */
+export function validateOptionSettingsForCreate(optionSettingsJson: string | undefined): void {
+  if (!optionSettingsJson) {
+    throw new Error('option-settings is required when creating a new environment. Must include IamInstanceProfile and ServiceRole.');
+  }
+
+  // JSON parsing already validated in validations.ts
+  const parsedSettings = JSON.parse(optionSettingsJson);
+
+  let hasIamInstanceProfile = false;
+  let hasServiceRole = false;
+
+  for (const setting of parsedSettings) {
+    if (setting.Namespace === 'aws:autoscaling:launchconfiguration' && 
+        setting.OptionName === 'IamInstanceProfile') {
+      hasIamInstanceProfile = true;
+    }
+
+    if (setting.Namespace === 'aws:elasticbeanstalk:environment' && 
+        setting.OptionName === 'ServiceRole') {
+      hasServiceRole = true;
+    }
+  }
+
+  if (!hasIamInstanceProfile) {
+    throw new Error('option-settings must include IamInstanceProfile setting with Namespace "aws:autoscaling:launchconfiguration" and OptionName "IamInstanceProfile"');
+  }
+
+  if (!hasServiceRole) {
+    throw new Error('option-settings must include ServiceRole setting with Namespace "aws:elasticbeanstalk:environment" and OptionName "ServiceRole"');
+  }
+}
+
+/**
  * AWS S3 LocationConstraint regions
  * Used for S3 bucket creation outside of us-east-1
  */

@@ -19,10 +19,6 @@ export interface Inputs {
     excludePatterns: string;
     optionSettings?: string;
 }
-export interface ParsedIamRoles {
-    iamInstanceProfile: string;
-    serviceRole: string;
-}
 export declare function validateAllInputs(): {
     valid: boolean;
 } & Partial<Inputs>;
