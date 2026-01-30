@@ -95544,7 +95544,7 @@ async function createZipFile(zipFileName, excludePatterns) {
         output.on('close', () => resolve());
         archive.on('error', reject);
         archive.pipe(output);
-        archive.glob('**/*', { ignore: excludePatterns });
+        archive.glob('**/*', { ignore: excludePatterns, dot: true });
         archive.finalize();
     });
 }

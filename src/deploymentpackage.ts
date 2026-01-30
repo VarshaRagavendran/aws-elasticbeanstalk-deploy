@@ -47,7 +47,7 @@ async function createZipFile(zipFileName: string, excludePatterns: string[]): Pr
     archive.on('error', reject);
 
     archive.pipe(output);
-    archive.glob('**/*', { ignore: excludePatterns });
+    archive.glob('**/*', { ignore: excludePatterns, dot: true });
     archive.finalize();
   });
 }
