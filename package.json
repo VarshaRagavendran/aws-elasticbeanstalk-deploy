@@ -45,7 +45,6 @@
     "archiver": "^7.0.1"
   },
   "devDependencies": {
-    "@amzn/brazil": "^2.0.6",
     "@types/archiver": "^6.0.2",
     "@types/jest": "^29.5.12",
     "@types/node": "^24.0.0",
