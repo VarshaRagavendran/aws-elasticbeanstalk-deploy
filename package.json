@@ -15,8 +15,7 @@
     "format": "prettier --write '**/*.ts'",
     "package": "ncc build src/main.ts -o dist --source-map --license licenses.txt",
     "prepublishOnly": "npm run build && npm run test",
-    "test": "jest --collectCoverage --collectCoverageFrom=src/**/*.{ts,js}",
-    "posttest": "generate-coverage-data --language typescript"
+    "test": "jest --collectCoverage --collectCoverageFrom=src/**/*.{ts,js}"
   },
   "main": "dist/index.js",
   "exports": "dist/index.js",

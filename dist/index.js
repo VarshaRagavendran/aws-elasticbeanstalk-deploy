@@ -96152,7 +96152,7 @@ function checkInputConflicts(inputs) {
     // Check if create-s3-bucket-if-not-exists is false
     if (inputs.createS3BucketIfNotExists === false) {
         core.warning('create-s3-bucket-if-not-exists is false. If the S3 bucket does not exist, deployment will fail. ' +
-            'Ensure the bucket exists: <application-name>-<account-id>');
+            'Ensure the bucket exists: <elasticbeanstalk-<region>-<account-id>');
     }
 }
 function validateAllInputs() {
