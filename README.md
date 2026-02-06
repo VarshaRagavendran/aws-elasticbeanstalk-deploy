@@ -6,9 +6,10 @@ A GitHub Action for deploying applications to AWS Elastic Beanstalk with automat
 
 - [Features](#features)
 - [Prerequisites](#prerequisites)
-  - [Step 1: Create IAM User](#step-1-create-iam-user)
-  - [Step 2: Create IAM Roles for Elastic Beanstalk](#step-2-create-iam-roles-for-elastic-beanstalk)
-  - [Step 3: Add GitHub Secrets](#step-3-add-github-secrets)
+  - [Step 1: Configure AWS Authentication](#step-1-configure-aws-authentication)
+  - [Step 2: Attach Required Permissions](#step-2-attach-required-permissions)
+  - [Step 3: Create IAM Roles for Elastic Beanstalk](#step-3-create-iam-roles-for-elastic-beanstalk)
+  - [Step 4: Add GitHub Secrets](#step-4-add-github-secrets)
 - [Quick Start](#quick-start)
 - [Inputs](#inputs)
 - [Outputs](#outputs)
@@ -32,20 +33,63 @@ A GitHub Action for deploying applications to AWS Elastic Beanstalk with automat
 
 Before using this action, you need to set up AWS IAM permissions. This section walks you through the required steps.
 
-### Step 1: Create IAM User
+### Step 1: Configure AWS Authentication
 
-Create an IAM user that GitHub Actions will use to deploy to Elastic Beanstalk.
+This action supports two authentication methods. Choose the one that best fits your needs.
 
-#### Required Permissions
+#### Option A: OpenID Connect (OIDC) — Recommended
 
-The IAM user needs two types of permissions:
+OIDC lets GitHub Actions authenticate with AWS using short-lived credentials without storing long-lived secrets. This is the recommended approach.
+
+**1. Create an OIDC Identity Provider** (one-time per AWS account)
+
+In the AWS Console: IAM → Identity providers → Add provider
+- **Provider type**: OpenID Connect
+- **Provider URL**: `https://token.actions.githubusercontent.com` (click "Get thumbprint")
+- **Audience**: `sts.amazonaws.com`
+
+**2. Create an IAM Role**
+
+Create an IAM role that GitHub Actions will assume. Attach the permissions from [Step 2](#step-2-attach-required-permissions), and set the following trust policy (replace `{account-id}` and `{your-org/your-repo}`):
+
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "Federated": "arn:aws:iam::{account-id}:oidc-provider/token.actions.githubusercontent.com"
+            },
+            "Action": "sts:AssumeRoleWithWebIdentity",
+            "Condition": {
+                "StringEquals": {
+                    "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+                },
+                "StringLike": {
+                    "token.actions.githubusercontent.com:sub": "repo:{your-org/your-repo}:*"
+                }
+            }
+        }
+    ]
+}
+```
+
+> **Note:** The `sub` condition is case-sensitive and must match your GitHub `owner/repo` exactly.
+
+#### Option B: Static Credentials
+
+Create an IAM user with an access key and attach the permissions from [Step 2](#step-2-attach-required-permissions).
+
+> **Note:** Static credentials are long-lived and must be rotated manually. OIDC is preferred for security.
+
+### Step 2: Attach Required Permissions
+
+Whether you're using an IAM role (OIDC) or IAM user (static credentials), attach the following two policies:
 
 **1. Elastic Beanstalk Permissions**
 
-Attach the AWS managed policy **`AdministratorAccess-AWSElasticBeanstalk`** to your IAM user. This policy grants the necessary permissions for Elastic Beanstalk to create and manage your environment, including:
-- Creating and updating applications, environments, and application versions
-- Managing EC2 instances, Auto Scaling groups, and load balancers
-- Accessing CloudWatch logs and metrics
+Attach the AWS managed policy **`AdministratorAccess-AWSElasticBeanstalk`**. This policy grants the permissions that Elastic Beanstalk requires from the calling principal to create and manage environments, including interactions with EC2, Auto Scaling, CloudFormation, and other services that Elastic Beanstalk orchestrates during deployment.
 
 **2. S3 Bucket Permissions**
 
@@ -53,7 +97,7 @@ This action uploads your deployment package to S3 before creating an application
 
 The S3 bucket name defaults to `{applicationName}-{accountId}` (e.g., `my-app-123456789012`), or you can specify a custom bucket name using the `s3-bucket-name` input.
 
-Add the following inline policy to your IAM user (replace `{bucket-name}` with your bucket name):
+Add the following inline policy (replace `{bucket-name}` with your bucket name):
 
 ```json
 {
@@ -79,7 +123,7 @@ Add the following inline policy to your IAM user (replace `{bucket-name}` with y
 }
 ```
 
-### Step 2: Create IAM Roles for Elastic Beanstalk
+### Step 3: Create IAM Roles for Elastic Beanstalk
 
 Elastic Beanstalk requires two IAM roles that must be passed in the `option-settings` input:
 
@@ -106,9 +150,17 @@ See: [Managing Elastic Beanstalk Service Roles](https://docs.aws.amazon.com/elas
 - [Create the Instance Profile](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-instanceprofile.html#iam-instanceprofile-create)
 - [Create the Service Role](https://docs.aws.amazon.com/elasticbeanstalk/latest/dg/iam-servicerole.html#iam-servicerole-create)
 
-### Step 3: Add GitHub Secrets
+### Step 4: Add GitHub Secrets
 
 Add the following secrets to your GitHub repository (Settings → Secrets and variables → Actions):
+
+**If using OIDC:**
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_ROLE_TO_ASSUME` | ARN of the IAM role (e.g., `arn:aws:iam::123456789012:role/my-github-actions-role`) |
+
+**If using static credentials:**
 
 | Secret | Description |
 |--------|-------------|
@@ -116,6 +168,60 @@ Add the following secrets to your GitHub repository (Settings → Secrets and va
 | `AWS_SECRET_ACCESS_KEY` | Secret access key for your IAM user |
 
 ## Quick Start
+
+### Using OIDC (Recommended)
+
+```yaml
+name: Deploy to Elastic Beanstalk
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  APPLICATION_NAME: my-app
+  ENVIRONMENT_NAME: my-app-env
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Elastic Beanstalk
+        uses: varsharagavendran/aws-elasticbeanstalk-deploy@main
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          application-name: ${{ env.APPLICATION_NAME }}
+          environment-name: ${{ env.ENVIRONMENT_NAME }}
+          solution-stack-name: '64bit Amazon Linux 2023 v4.3.0 running Python 3.11'
+          option-settings: |
+            [
+              {
+                "Namespace": "aws:autoscaling:launchconfiguration",
+                "OptionName": "IamInstanceProfile",
+                "Value": "aws-elasticbeanstalk-ec2-role"
+              },
+              {
+                "Namespace": "aws:elasticbeanstalk:environment",
+                "OptionName": "ServiceRole",
+                "Value": "aws-elasticbeanstalk-service-role"
+              }
+            ]
+```
+
+### Using Static Credentials
 
 ```yaml
 name: Deploy to Elastic Beanstalk
@@ -320,7 +426,7 @@ Environment names must be 4-40 characters, contain only alphanumeric characters 
 
 **S3 Access Denied**
 
-Ensure your IAM user has S3 permissions for the deployment bucket. See [Step 1: Create IAM User](#step-1-create-iam-user).
+Ensure your IAM user or role has S3 permissions for the deployment bucket. See [Step 2: Attach Required Permissions](#step-2-attach-required-permissions).
 
 **Deployment Timeout**
 
