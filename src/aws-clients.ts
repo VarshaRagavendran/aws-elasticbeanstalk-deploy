@@ -5,7 +5,7 @@ import { IAMClient } from '@aws-sdk/client-iam';
 
 /**
  * Manages AWS SDK clients as singletons to avoid recreating instances
- * for every operation.
+ * for every operation
  */
 export class AWSClients {
   private static instances: Map<string, AWSClients> = new Map();
