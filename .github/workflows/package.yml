@@ -33,9 +33,18 @@ jobs:
           if git diff --staged --quiet; then
             echo "No changes to commit"
           else
-            BRANCH_NAME="chore/update-dist-${{ github.run_id }}"
-            git checkout -b "$BRANCH_NAME"
+            BRANCH_NAME="chore/update-dist"
+            git fetch origin "$BRANCH_NAME" || true
+            if git show-ref --verify --quiet "refs/remotes/origin/$BRANCH_NAME"; then
+              git checkout "$BRANCH_NAME"
+              git merge main --no-edit
+            else
+              git checkout -b "$BRANCH_NAME"
+            fi
+            git add dist/
             git commit -m "(chore) updating dist"
             git push origin "$BRANCH_NAME"
-            gh pr create --title "(chore) Update dist" --body "Automated PR to update the dist folder." --base main
+            if ! gh pr list --head "$BRANCH_NAME" --state open | grep -q .; then
+              gh pr create --title "(chore) Update dist" --body "Automated PR to update the dist folder." --base main
+            fi
           fi
