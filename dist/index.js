@@ -95510,7 +95510,7 @@ const fs = __importStar(__nccwpck_require__(79896));
 const archiver_1 = __importDefault(__nccwpck_require__(99392));
 /**
  * Creates a deployment package for Elastic Beanstalk
- * @param packagePath - Path to existing package (optional)
+ * @param packagePath - Path to existing package (optional).
  * @param versionLabel - Version label for the deployment
  * @param excludePatternsInput - Comma-separated patterns to exclude
  * @returns Object containing the path to the deployment package
