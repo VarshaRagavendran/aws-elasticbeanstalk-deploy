@@ -95021,7 +95021,7 @@ const client_sts_1 = __nccwpck_require__(71695);
 const client_iam_1 = __nccwpck_require__(16764);
 /**
  * Manages AWS SDK clients as singletons to avoid recreating instances
- * for every operation.
+ * for every operation
  */
 class AWSClients {
     static instances = new Map();

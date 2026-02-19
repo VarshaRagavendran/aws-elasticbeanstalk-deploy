@@ -4,7 +4,7 @@ import { STSClient } from '@aws-sdk/client-sts';
 import { IAMClient } from '@aws-sdk/client-iam';
 /**
  * Manages AWS SDK clients as singletons to avoid recreating instances
- * for every operation.
+ * for every operation
  */
 export declare class AWSClients {
     private static instances;
