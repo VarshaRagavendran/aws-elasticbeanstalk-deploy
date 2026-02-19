@@ -7,7 +7,7 @@ import archiver from 'archiver';
  * @param packagePath - Path to existing package (optional)
  * @param versionLabel - Version label for the deployment
  * @param excludePatternsInput - Comma-separated patterns to exclude
- * @returns Object containing the path to the deployment package.
+ * @returns Object containing the path to the deployment package
  */
 export async function createDeploymentPackage(
   packagePath: string | undefined,
