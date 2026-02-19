@@ -95112,7 +95112,7 @@ const validations_1 = __nccwpck_require__(5215);
 exports.MAX_DEPLOYMENT_PACKAGE_SIZE_BYTES = 500 * 1024 * 1024;
 /**
  * Validate that option-settings contains required IAM roles when creating an environment.
- * Note: JSON format validation is already done in validations.ts
+ * Note: JSON format validation is already done in validations.ts.
  */
 function validateOptionSettingsForCreate(optionSettingsJson) {
     if (!optionSettingsJson) {
